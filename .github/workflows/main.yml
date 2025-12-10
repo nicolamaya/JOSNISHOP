@@ -60,5 +60,6 @@ jobs:
     - name: Correr pruebas unitarias (Pytest) # Paso 5: Ejecutar las pruebas unitarias
       env:
           PYTHONPATH: ${{ github.workspace }}/BACKEND
+          DB_HOST: mysql
       run: |
         pytest
