@@ -1,8 +1,8 @@
-"""subo tablas finales
+"""Initial migration
 
-Revision ID: 905d58c99650
+Revision ID: b33559cd47b4
 Revises: 
-Create Date: 2025-10-29 19:23:32.175351
+Create Date: 2025-12-02 10:00:27.851197
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '905d58c99650'
+revision: str = 'b33559cd47b4'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -50,6 +50,11 @@ def upgrade() -> None:
     sa.Column('contraseña', sa.String(length=255), nullable=True),
     sa.Column('rol_id', sa.Integer(), nullable=True),
     sa.Column('estado', sa.Boolean(), nullable=True),
+    sa.Column('tipo_documento', sa.String(length=50), nullable=True),
+    sa.Column('numero_documento', sa.String(length=100), nullable=True),
+    sa.Column('fecha_nacimiento', sa.String(length=20), nullable=True),
+    sa.Column('seguridad_pregunta', sa.String(length=255), nullable=True),
+    sa.Column('seguridad_respuesta', sa.String(length=255), nullable=True),
     sa.ForeignKeyConstraint(['rol_id'], ['roles.id_rol'], ),
     sa.PrimaryKeyConstraint('id_usuario')
     )
@@ -76,10 +81,16 @@ def upgrade() -> None:
     op.create_table('pagos',
     sa.Column('id_pago', sa.Integer(), autoincrement=True, nullable=False),
     sa.Column('id_usuario', sa.Integer(), nullable=False),
-    sa.Column('nombre_tarjeta', sa.String(length=100), nullable=False),
-    sa.Column('numero_tarjeta', sa.String(length=20), nullable=False),
-    sa.Column('fecha_expiracion', sa.String(length=5), nullable=False),
-    sa.Column('cvv', sa.String(length=4), nullable=False),
+    sa.Column('tipo_pago', sa.String(length=50), nullable=True),
+    sa.Column('nombre_tarjeta', sa.String(length=255), nullable=True),
+    sa.Column('numero_tarjeta', sa.String(length=255), nullable=True),
+    sa.Column('tipo_tarjeta', sa.String(length=50), nullable=True),
+    sa.Column('fecha_expiracion', sa.String(length=255), nullable=True),
+    sa.Column('cvv', sa.String(length=255), nullable=True),
+    sa.Column('referencia_pago', sa.String(length=255), nullable=True),
+    sa.Column('banco', sa.String(length=100), nullable=True),
+    sa.Column('monto', sa.Integer(), nullable=True),
+    sa.Column('estado', sa.String(length=50), nullable=True),
     sa.Column('fecha_pago', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=True),
     sa.ForeignKeyConstraint(['id_usuario'], ['usuarios.id_usuario'], ),
     sa.PrimaryKeyConstraint('id_pago')
@@ -151,9 +162,12 @@ def upgrade() -> None:
     op.create_table('videos',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('producto_id', sa.Integer(), nullable=True),
+    sa.Column('usuario_id', sa.Integer(), nullable=True),
+    sa.Column('tipo', sa.String(length=50), nullable=True),
     sa.Column('url', sa.String(length=200), nullable=True),
     sa.Column('fecha_subida', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['producto_id'], ['productos.id'], ),
+    sa.ForeignKeyConstraint(['usuario_id'], ['usuarios.id_usuario'], ),
     sa.PrimaryKeyConstraint('id')
     )
     # ### end Alembic commands ###

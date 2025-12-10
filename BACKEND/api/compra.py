@@ -7,7 +7,9 @@ from models.pedido import Pedido
 from models.detallepedido import DetallePedido
 from models.inventario import Inventario
 from utils.email_utils import enviar_confirmacion_compra, enviar_alerta_stock
+from utils.pdf_utils import generate_invoice_pdf
 from datetime import datetime
+import os
 
 # Creamos un enrutador de FastAPI. Esto nos permite agrupar y organizar las rutas de nuestra API.
 router = APIRouter()
@@ -112,8 +114,46 @@ def realizar_compra(compra: CompraRequest):
 
         # --- Paso 3: Finalizar y responder ---
         
-        # Si todo fue bien, enviamos un correo de confirmación al cliente.
-        enviar_confirmacion_compra(compra.correo, nuevo_pedido.id_pedido)
+        # Generar PDF de la factura (si se desea incluir detalles)
+        try:
+            # Obtener cliente si existe para incluir nombre/email
+            cliente = None
+            from models.usuarios import Usuario
+            cliente = db.query(Usuario).filter_by(id_usuario=compra.cliente_id).first()
+
+            items = []
+            from models.producto import Producto
+            for detalle in compra.detalles:
+                # intentar obtener nombre de producto
+                prod = db.query(Producto).filter_by(id=detalle.producto_id).first()
+                nombre = prod.nombre if prod else f'Producto ID {detalle.producto_id}'
+                items.append({
+                    'cantidad': detalle.cantidad,
+                    'descripcion': nombre,
+                    'subtotal': detalle.subtotal,
+                    'precio': detalle.subtotal / detalle.cantidad if detalle.cantidad > 0 else detalle.subtotal
+                })
+
+            # Ruta al logo en frontend/public
+            logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'FRONTEND', 'public', 'logo.png')
+            if not os.path.exists(logo_path):
+                logo_path = None
+
+            pedido_pdf_bytes = generate_invoice_pdf(nuevo_pedido, cliente=cliente, items=items, logo_path=logo_path)
+            print(f"[COMPRA] PDF generado exitosamente: {len(pedido_pdf_bytes) if pedido_pdf_bytes else 0} bytes")
+        except Exception as e:
+            # No bloquear la compra si falla la generación de PDF
+            print(f'[COMPRA] Error generando PDF de factura: {e}')
+            import traceback
+            traceback.print_exc()
+            pedido_pdf_bytes = None
+
+        # Si todo fue bien, enviamos un correo de confirmación al cliente con la factura adjunta.
+        try:
+            print(f"[COMPRA] Enviando correo de confirmación a {compra.correo} | PDF: {len(pedido_pdf_bytes) if pedido_pdf_bytes else 'NO'}")
+            enviar_confirmacion_compra(compra.correo, nuevo_pedido.id_pedido, pdf_bytes=pedido_pdf_bytes)
+        except Exception as e:
+            print(f'[COMPRA] Error enviando correo de confirmación (no bloqueante): {e}')
 
         # Devolvemos una respuesta exitosa al cliente con un mensaje y el número de pedido.
         return {"mensaje": "Compra realizada exitosamente", "numero_pedido": nuevo_pedido.id_pedido}

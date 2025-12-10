@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 import os
 import re
 import urllib.parse
+from dotenv import load_dotenv  # Para cargar variables de entorno
 
 # --- Importación de todos los enrutadores (routers) del proyecto ---
 # Cada línea importa un `router` de un archivo de controlador diferente.
@@ -33,6 +34,9 @@ from controllers.ventas_controller import router as ventas_router
 # --- Crear la instancia de la aplicación FastAPI ---
 # Esta es la línea que inicializa tu aplicación.
 app = FastAPI()
+
+# Cargar variables de entorno
+load_dotenv()
 
 # Asegurarse de que la carpeta 'static' y 'static/uploads' existan antes de montar
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -78,36 +82,52 @@ async def sanitize_static_path(request, call_next):
 # Servir archivos estáticos (imágenes/videos subidos)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# --- Configuración del middleware de CORS ---
-# Agregamos el middleware a la aplicación. Esto es crucial para la seguridad
-# y el funcionamiento de tu API cuando el frontend está en un dominio o puerto diferente.
+# --- Configuración del middleware de CORS (SEGURIDAD) ---
+# Obtener orígenes permitidos desde variable de entorno
+allowed_origins_str = os.getenv(
+    "ALLOWED_ORIGINS", 
+    "http://localhost:5173,http://localhost:3000"
+)
+allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",")]
+
+# En desarrollo, permitir localhost; en producción, ser más restrictivo
+environment = os.getenv("ENVIRONMENT", "development").lower()
+if environment == "production":
+    # En producción: SIN allow_credentials con allow_origins=["*"]
+    # Usar lista explícita de orígenes
+    allow_credentials_cors = False
+else:
+    # En desarrollo: permitir credenciales
+    allow_credentials_cors = True
+
 app.add_middleware(
     CORSMiddleware,
-    # `allow_origins`: Lista de orígenes (dominios) que pueden acceder a tu API.
-    # "http://localhost:5173" es un ejemplo común para proyectos de frontend con Vite.
-    allow_origins=["*"],  # O especifica tu dominio frontend
-    # `allow_credentials`: Permite que las solicitudes incluyan credenciales (ej. cookies, cabeceras de autorización).
-    allow_credentials=True,
-    # `allow_methods`: Lista de métodos HTTP permitidos (GET, POST, PUT, DELETE, etc.).
-    # "*" permite todos los métodos.
-    allow_methods=["*"],
-    # `allow_headers`: Lista de cabeceras HTTP permitidas.
-    # "*" permite todas las cabeceras.
-    allow_headers=["*"],
+    allow_origins=allowed_origins,  # Específico: NO usar "*" con credentials
+    allow_credentials=allow_credentials_cors,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Explícito
+    allow_headers=["Content-Type", "Authorization"],  # Explícito
 )
 
 @app.middleware("http")
 async def add_security_headers(request, call_next):
     response = await call_next(request)
+    # Encabezados de seguridad
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # CSP mejorada: permitir 'self' y recursos necesarios
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "  # Para desarrollo, en prod sin inline
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "font-src 'self'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none';"
+    )
     return response
 
 # --- Inclusión de todas las rutas de la API ---
-# Con `app.include_router()`, registramos cada uno de los enrutadores que importamos.
-# FastAPI los integra en la aplicación principal, combinando todas las rutas
-# bajo una misma API.
 app.include_router(categoria_router)
 app.include_router(producto_router)
 app.include_router(usuario_router)

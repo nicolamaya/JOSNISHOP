@@ -8,6 +8,11 @@ class UsuarioBase(BaseModel):
     correo: str
     contraseña: str
     rol_id: int
+    tipo_documento: Optional[str] = None
+    numero_documento: Optional[str] = None
+    fecha_nacimiento: Optional[str] = None
+    seguridad_pregunta: Optional[str] = None
+    seguridad_respuesta: Optional[str] = None
 
 
 class UsuarioCreate(UsuarioBase):
@@ -24,10 +29,10 @@ class UsuarioUpdate(BaseModel):
 
 class UsuarioOut(UsuarioBase):
     id_usuario: int
-    estado: int  # 0 = inactivo, 1 = activo
+    estado: Optional[int] = None  # 0 = inactivo, 1 = activo (nullable to match DB)
 
     class Config:
-        from_attributes = True
+        orm_mode = True
 
 
 class UsuarioLogin(BaseModel):
