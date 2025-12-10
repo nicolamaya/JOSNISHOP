@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { useToast } from "../../contexts/useToastContext";
 
 type Usuario = {
   id_usuario: number;
@@ -10,8 +11,6 @@ type Usuario = {
   rol_id: number;
   estado: number;
 };
-
-type Rol = { id_rol: number; nombre: string };
 
 const getRoleName = (roleId: number | undefined): string => {
   switch (roleId) {
@@ -37,26 +36,68 @@ const getRoleBadgeClass = (roleId: number | undefined): string => {
 
 const UserRoles: React.FC = () => {
   const [users, setUsers] = useState<Usuario[]>([]);
+  const [filteredUsers, setFilteredUsers] = useState<Usuario[]>([]);
+  const { showToast } = useToast();
 
-  const load = async () => {
+  // Estados para los filtros
+  const [filterNombre, setFilterNombre] = useState("");
+  const [filterCorreo, setFilterCorreo] = useState("");
+  const [filterRoles, setFilterRoles] = useState<number[]>([]);
+  const [filterEstados, setFilterEstados] = useState<number[]>([]);
+
+  const load = useCallback(async () => {
     try {
       const u = await axios.get<Usuario[]>("http://localhost:8000/usuarios");
-      // Asegurémonos de que el estado se maneje como número exactamente como viene de la BD
       const usersWithFixedState = u.data.map(user => ({
         ...user,
         estado: user.estado
       }));
       setUsers(usersWithFixedState);
+      setFilteredUsers(usersWithFixedState);
     } catch (err) {
       console.error(err);
-      alert("Error cargando usuarios");
+      showToast("Error cargando usuarios", "error");
     }
-  };
+  }, [showToast]);
 
-  useEffect(() => { load(); }, []);
+  // Aplicar filtros
+  const applyFilters = useCallback(() => {
+    let filtered = users;
+
+    if (filterNombre) {
+      filtered = filtered.filter(u =>
+        u.nombre.toLowerCase().includes(filterNombre.toLowerCase())
+      );
+    }
+
+    if (filterCorreo) {
+      filtered = filtered.filter(u =>
+        u.correo.toLowerCase().includes(filterCorreo.toLowerCase())
+      );
+    }
+
+    if (filterRoles.length > 0) {
+      filtered = filtered.filter(u => filterRoles.includes(u.rol_id));
+    }
+
+    if (filterEstados.length > 0) {
+      filtered = filtered.filter(u => filterEstados.includes(u.estado));
+    }
+
+    setFilteredUsers(filtered);
+  }, [users, filterNombre, filterCorreo, filterRoles, filterEstados]);
+
+  // Cargar datos inicialmente
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Ejecutar filtros cuando cambie alguno
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
 
   const handleChangeRole = async (userId: number, rolId: number) => {
-    // open confirm modal for role change
     setPendingChange({ userId, rolId });
   };
 
@@ -64,7 +105,7 @@ const UserRoles: React.FC = () => {
 
   const confirmChange = async () => {
     if (!pendingChange) return;
-    try {
+      try {
       await axios.put(`http://localhost:8000/usuarios/${pendingChange.userId}`, {
         rol_id: pendingChange.rolId
       });
@@ -72,11 +113,33 @@ const UserRoles: React.FC = () => {
       load();
     } catch (err) {
       console.error(err);
-      alert('Error actualizando rol');
+      showToast('Error actualizando rol', 'error');
     }
   };
 
   const cancelChange = () => setPendingChange(null);
+
+  // Toggle para seleccionar múltiples roles
+  const toggleRoleFilter = (rolId: number) => {
+    setFilterRoles(prev =>
+      prev.includes(rolId) ? prev.filter(r => r !== rolId) : [...prev, rolId]
+    );
+  };
+
+  // Toggle para seleccionar múltiples estados
+  const toggleEstadoFilter = (estado: number) => {
+    setFilterEstados(prev =>
+      prev.includes(estado) ? prev.filter(e => e !== estado) : [...prev, estado]
+    );
+  };
+
+  // Limpiar filtros
+  const clearFilters = () => {
+    setFilterNombre("");
+    setFilterCorreo("");
+    setFilterRoles([]);
+    setFilterEstados([]);
+  };
 
   const downloadPdf = () => {
     const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -100,12 +163,12 @@ const UserRoles: React.FC = () => {
       doc.text(mensajeLines, 40, 100);
 
       const startY = 120 + mensajeLines.length * 12;
-      if (users.length === 0) {
+      if (filteredUsers.length === 0) {
         doc.setFontSize(12);
         doc.text('No hay usuarios para mostrar.', 40, startY);
       } else {
         const headers = [["ID", "Nombre", "Correo", "Rol", "Estado"]];
-        const rows = users.map(u => [u.id_usuario, u.nombre, u.correo, getRoleName(u.rol_id), u.estado ? 'Activo' : 'Inactivo']);
+        const rows = filteredUsers.map(u => [u.id_usuario, u.nombre, u.correo, getRoleName(u.rol_id), u.estado ? 'Activo' : 'Inactivo']);
         autoTable(doc, {
           head: headers,
           body: rows,
@@ -150,6 +213,117 @@ const UserRoles: React.FC = () => {
             <button className="btn-save" onClick={downloadPdf}>Descargar PDF</button>
           </div>
         </div>
+
+        {/* Sección de Filtros */}
+        <div style={{
+          background: '#f5f5f5',
+          padding: '16px',
+          borderRadius: '8px',
+          marginBottom: '20px',
+          border: '1px solid #ddd'
+        }}>
+          <h3 style={{ margin: '0 0 16px 0', color: '#054d25', fontSize: '16px' }}>Filtros</h3>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+            gap: '16px',
+            marginBottom: '16px'
+          }}>
+            {/* Filtro por Nombre */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                Nombre
+              </label>
+              <input
+                type="text"
+                placeholder="Buscar por nombre..."
+                value={filterNombre}
+                onChange={(e) => setFilterNombre(e.target.value)}
+                className="form-input"
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            {/* Filtro por Correo */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                Correo
+              </label>
+              <input
+                type="text"
+                placeholder="Buscar por correo..."
+                value={filterCorreo}
+                onChange={(e) => setFilterCorreo(e.target.value)}
+                className="form-input"
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            {/* Filtro por Rol */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#333' }}>
+                Rol
+              </label>
+              <div style={{ display: 'flex', gap: '12px', flexDirection: 'column' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={filterRoles.includes(1)}
+                    onChange={() => toggleRoleFilter(1)}
+                  />
+                  <span>Vendedor</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={filterRoles.includes(2)}
+                    onChange={() => toggleRoleFilter(2)}
+                  />
+                  <span>Cliente</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Filtro por Estado */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#333' }}>
+                Estado
+              </label>
+              <div style={{ display: 'flex', gap: '12px', flexDirection: 'column' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={filterEstados.includes(1)}
+                    onChange={() => toggleEstadoFilter(1)}
+                  />
+                  <span>Activo</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={filterEstados.includes(0)}
+                    onChange={() => toggleEstadoFilter(0)}
+                  />
+                  <span>Inactivo</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={clearFilters}
+            className="btn-delete"
+            style={{ padding: '8px 16px', fontSize: '14px' }}
+          >
+            Limpiar filtros
+          </button>
+
+          <p style={{ margin: '12px 0 0 0', color: '#666', fontSize: '14px' }}>
+            Mostrando {filteredUsers.length} de {users.length} usuarios
+          </p>
+        </div>
+
         <div className="table-container">
           <div style={{ padding: 8 }}>
             <table className="custom-table">
@@ -164,7 +338,7 @@ const UserRoles: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {users.map(u => (
+                {filteredUsers.map(u => (
                   <tr key={u.id_usuario}>
                     <td>{u.id_usuario}</td>
                     <td>{u.nombre}</td>
@@ -175,8 +349,8 @@ const UserRoles: React.FC = () => {
                       </span>
                     </td>
                     <td>
-                      <span className={`status-badge ${u.estado === 1 || u.estado === true ? 'active' : 'inactive'}`}>
-                        {(u.estado === 1 || u.estado === true) ? 'Activo' : 'Inactivo'}
+                      <span className={`status-badge ${u.estado === 1 ? 'active' : 'inactive'}`}>
+                        {u.estado === 1 ? 'Activo' : 'Inactivo'}
                       </span>
                     </td>
                     <td>

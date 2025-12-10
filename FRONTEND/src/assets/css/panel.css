@@ -37,7 +37,7 @@ body {
   height: 0;
   overflow: hidden;
   border-radius: 12px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+  animation: slideDown 0.5s ease-out;
 }
 
 .video-container iframe {
@@ -240,6 +240,21 @@ body {
   box-shadow: 0 6px 20px rgba(0,0,0,0.08);
   padding: 16px;
   margin: 1.2rem 0;
+}
+
+/* Scrollable area inside panel cards (used by Pedidos and other long lists) */
+.panel-card .panel-scroll {
+  max-height: calc(100vh - 260px); /* leave space for header, sidebar and spacing */
+  overflow-y: auto;
+  padding-right: 8px; /* avoid scrollbar overlapping content */
+}
+
+.panel-card .panel-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+.panel-card .panel-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.12);
+  border-radius: 6px;
 }
 
 .custom-table {

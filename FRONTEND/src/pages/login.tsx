@@ -1,23 +1,82 @@
 import React, { useState } from "react";
-import { Eye, EyeOff } from "lucide-react"; // <-- Agrega esto
+import { Eye, EyeOff } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import "../assets/css/login.css";
+import { useToast } from "../contexts/useToastContext";
+import ConfirmModal from "../components/ConfirmModal";
 
+interface ReactivateData {
+  id_usuario: number;
+  [key: string]: string | number | boolean;
+}
 
 const Login: React.FC = () => {
   const [correo, setCorreo] = useState("");
   const [contraseña, setContraseña] = useState("");
-  const [mensaje, setMensaje] = useState("");
   const [intentosFallidos, setIntentosFallidos] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
+  const [reactivateConfirm, setReactivateConfirm] = useState<{ show: boolean; data: ReactivateData | null }>({ show: false, data: null });
   const MAX_INTENTOS = 5;
   const navigate = useNavigate();
+  const { showToast } = useToast();
+
+  const handleReactivate = async () => {
+    if (!reactivateConfirm.data) return;
+    
+    try {
+      const reactiva = await fetch(`http://localhost:8000/usuarios/${reactivateConfirm.data.id_usuario}/activar`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" }
+      });
+      
+      if (reactiva.ok) {
+        const res2 = await fetch("http://localhost:8000/usuarios/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ correo, contraseña }), 
+        });
+        const data2 = await res2.json();
+        
+        if (res2.ok) {
+          showToast("¡Cuenta reactivada! Ingresando...", "success");
+          if (data2.id_usuario) {
+            localStorage.setItem("userId", data2.id_usuario.toString());
+          }
+          if (data2.nombre) {
+            localStorage.setItem("userName", data2.nombre);
+          }
+          if (data2.correo) {
+            localStorage.setItem("userEmail", data2.correo);
+          }
+          if (data2.rol) {
+            let rol = data2.rol.toLowerCase();
+            if (rol.includes("vend")) rol = "vendedor";
+            if (rol.includes("clien")) rol = "cliente";
+            localStorage.setItem("userRole", rol);
+          } else {
+            localStorage.removeItem("userRole");
+          }
+          localStorage.setItem("role", String(data2.rol_id));
+          localStorage.setItem("token", data2.access_token ? data2.access_token : "logueado");
+          setTimeout(() => navigate("/panel"), 1500);
+        } else {
+          showToast(data2.detail || "Error al iniciar sesión tras reactivar.", "error");
+        }
+      } else {
+        showToast("No se pudo reactivar la cuenta. Contacta soporte.", "error");
+      }
+    } catch (error) {
+      console.error(error);
+      showToast("Error al reactivar la cuenta", "error");
+    }
+    
+    setReactivateConfirm({ show: false, data: null });
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMensaje(""); // Limpia mensaje anterior
     if (intentosFallidos >= MAX_INTENTOS) {
-      setMensaje("Cuenta temporalmente bloqueada. Intenta más tarde.");
+      showToast("Cuenta temporalmente bloqueada. Intenta más tarde.", "error");
       return;
     }
     try {
@@ -30,64 +89,14 @@ const Login: React.FC = () => {
       const data = await res.json();
       console.log("Respuesta completa:", data);
 
-      // Si el usuario está desactivado
       if (data.estado === 0 || data.estado === false) {
-        const confirmar = window.confirm(
-          "Tu cuenta está desactivada. ¿Quieres reactivarla y volver a iniciar sesión?\n\nAl reactivarla, podrás acceder nuevamente a tu cuenta y a todos tus datos."
-        );
-        if (confirmar) {
-          // Reactiva la cuenta
-          const reactiva = await fetch(`http://localhost:8000/usuarios/${data.id_usuario}/activar`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" }
-          });
-          if (reactiva.ok) {
-            // Vuelve a intentar login automáticamente
-            const res2 = await fetch("http://localhost:8000/usuarios/login", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ correo, contraseña }), 
-            });
-            const data2 = await res2.json();
-            if (res2.ok) {
-              setMensaje("¡Cuenta reactivada! Ingresando...");
-              // Guardar datos principales en localStorage
-              if (data2.id_usuario) {
-                localStorage.setItem("userId", data2.id_usuario.toString());
-              }
-              if (data2.nombre) {
-                localStorage.setItem("userName", data2.nombre);
-              }
-              if (data2.correo) {
-                localStorage.setItem("userEmail", data2.correo);
-              }
-              if (data2.rol) {
-                let rol = data2.rol.toLowerCase();
-                if (rol.includes("vend")) rol = "vendedor";
-                if (rol.includes("clien")) rol = "cliente";
-                localStorage.setItem("userRole", rol);
-              } else {
-                localStorage.removeItem("userRole");
-              }
-              localStorage.setItem("role", String(data2.rol_id));
-              localStorage.setItem("token", data2.token ? data2.token : "logueado");
-              navigate("/panel");
-            } else {
-              setMensaje(data2.detail || "Error al iniciar sesión tras reactivar.");
-            }
-          } else {
-            setMensaje("No se pudo reactivar la cuenta. Contacta soporte.");
-          }
-        } else {
-          setMensaje("Cuenta desactivada. No puedes ingresar.");
-        }
+        setReactivateConfirm({ show: true, data });
         return;
       }
 
       if (res.ok) {
-        setMensaje("Login exitoso!!");
-        setIntentosFallidos(0); // Reinicia los intentos al éxito
-        // Guardar datos principales en localStorage
+        showToast("¡Inicio de sesión exitoso!", "success");
+        setIntentosFallidos(0);
         if (data.id_usuario) {
           localStorage.setItem("userId", data.id_usuario.toString());
         }
@@ -106,20 +115,20 @@ const Login: React.FC = () => {
           localStorage.removeItem("userRole");
         }
         localStorage.setItem("role", String(data.rol_id));
-        localStorage.setItem("token", data.token ? data.token : "logueado");
-        navigate("/panel");
+        localStorage.setItem("token", data.access_token ? data.access_token : "logueado");
+        setTimeout(() => navigate("/panel"), 1500);
       } else {
         const intentosRestantes = MAX_INTENTOS - (intentosFallidos + 1);
         setIntentosFallidos(intentosFallidos + 1);
         if (intentosRestantes > 0) {
-          setMensaje((data.detail || "Error al iniciar sesión") + `\nTe quedan ${intentosRestantes} intento(s) antes de ser bloqueado.`);
+          showToast((data.detail || "Error al iniciar sesión") + `. Te quedan ${intentosRestantes} intento(s).`, "warning");
         } else {
-          setMensaje("Cuenta temporalmente bloqueada. Intenta más tarde.");
+          showToast("Cuenta temporalmente bloqueada. Intenta más tarde.", "error");
         }
       }
     } catch (error) {
       console.error("Error en login:", error);
-      setMensaje("Error de conexión con el servidor");
+      showToast("Error de conexión con el servidor", "error");
     }
   };
 
@@ -161,27 +170,26 @@ const Login: React.FC = () => {
             Contraseña <span style={{ color: "red" }}>*</span>
           </label>
           <div className="login-password-wrapper">
-          <input
-            type={showPassword ? "text" : "password"}
-            id="contraseña"
-            placeholder="Tu contraseña"
-            value={contraseña}
-            onChange={(e) => setContraseña(e.target.value)}
-            required
-            autoComplete="current-password"
-          />
-          <button
-            type="button"
-            className="login-password-toggle"
-            onClick={() => setShowPassword(!showPassword)}
-            tabIndex={0}
-            aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-          >
-            {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-          </button>
-        </div>
+            <input
+              type={showPassword ? "text" : "password"}
+              id="contraseña"
+              placeholder="Tu contraseña"
+              value={contraseña}
+              onChange={(e) => setContraseña(e.target.value)}
+              required
+              autoComplete="current-password"
+            />
+            <button
+              type="button"
+              className="login-password-toggle"
+              onClick={() => setShowPassword(!showPassword)}
+              tabIndex={0}
+              aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+            >
+              {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+            </button>
+          </div>
           <button type="submit">Continuar</button>
-          <div>{mensaje}</div>
         </form>
         <br />
         <p className="register-link">
@@ -204,6 +212,17 @@ const Login: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={reactivateConfirm.show}
+        title="Cuenta desactivada"
+        message="Tu cuenta está desactivada. ¿Quieres reactivarla y volver a iniciar sesión? Al reactivarla, podrás acceder nuevamente a tu cuenta y a todos tus datos."
+        confirmText="Sí, reactivar"
+        cancelText="Cancelar"
+        isDangerous={false}
+        onConfirm={handleReactivate}
+        onCancel={() => setReactivateConfirm({ show: false, data: null })}
+      />
     </div>
   );
 };

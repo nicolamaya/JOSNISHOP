@@ -30,6 +30,11 @@ import UserRoles from "../components/panel/UserRoles";
 // Panel Principal
 // ===================
 const Panel: React.FC = () => {
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(
+    (() => {
+      try { return localStorage.getItem('userAvatar'); } catch { return null; }
+    })()
+  );
   const [activePage, setActivePage] = useState<string>("dashboard");
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [selectedPedidoId, setSelectedPedidoId] = useState<number | null>(null);
@@ -77,6 +82,41 @@ const Panel: React.FC = () => {
     fetch(`/api/resenas/comprados/${userId}`)
       .then(res => res.json())
       .then(data => setProductosComprados(data));
+  }, [userId]);
+
+  // Load avatar from backend (or localStorage) and listen for changes
+  useEffect(() => {
+    let mounted = true;
+    const loadAvatar = async () => {
+      try {
+        // prefer backend canonical URL
+        if (!userId) return;
+        const res = await fetch(`http://localhost:8000/usuarios/${userId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!mounted) return;
+        if (data.foto_perfil && data.foto_perfil.length > 0) {
+          const foto = data.foto_perfil[data.foto_perfil.length - 1];
+          const raw = foto.url || '';
+          const full = raw.startsWith('http') ? raw : `http://localhost:8000${raw}`;
+          setAvatarUrl(full);
+          try { localStorage.setItem('userAvatar', full); } catch(e) {}
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    loadAvatar();
+
+    const handler = (ev: any) => {
+      try {
+        const url = ev?.detail?.url || null;
+        setAvatarUrl(url);
+        if (url) localStorage.setItem('userAvatar', url);
+      } catch (e) {}
+    };
+    window.addEventListener('avatarChanged', handler as EventListener);
+    return () => { mounted = false; window.removeEventListener('avatarChanged', handler as EventListener); };
   }, [userId]);
 
   const renderContent = () => {
@@ -240,7 +280,15 @@ const Panel: React.FC = () => {
       {/* Sidebar */}
       <aside className={`sidebar_panel ${isSidebarOpen ? "open" : ""}`}>
         <div className="user-card">
-          <div className="user-avatar">{getInitials(userName)}</div>
+          <div className="user-avatar">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="avatar" style={{ width: '56px', height: '56px', borderRadius: '50%', objectFit: 'cover' }} />
+            ) : (
+              <div style={{ width: '56px', height: '56px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#2e7d32', color: '#fff', fontWeight: 700 }}>
+                {getInitials(userName)}
+              </div>
+            )}
+          </div>
           <div>
             <p className="user-name">{userName}</p>
             <p className="user-role">{getRoleLabel(userRole)}</p>

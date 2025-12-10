@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { useToast } from '../../contexts/useToastContext'
+import { useNavigate } from 'react-router-dom'
 
 type Message = { from: 'user'|'bot', text: string }
 
@@ -11,8 +13,18 @@ export default function ChatBot(){
   const [loading, setLoading] = useState(false)
   const [waPhone, setWaPhone] = useState<string | null>(null)
   const [lastUserMessage, setLastUserMessage] = useState<string | null>(null)
+  const { showToast } = useToast()
+  const navigate = useNavigate()
 
   async function send(){
+    // Require login before sending to backend
+    const token = localStorage.getItem('token')
+    if (!token) {
+      showToast('Debes iniciar sesión para usar el chatbot. Serás redirigido al login.', 'warning')
+      setTimeout(() => navigate('/login'), 1200)
+      return
+    }
+
     if(!input.trim()) return
     const userMsg = input.trim()
   // build history including the new user message for context
@@ -24,12 +36,43 @@ export default function ChatBot(){
     setLoading(true)
 
     try{
-      const userId = Number(localStorage.getItem('userId')) || null
-      const res = await fetch('http://localhost:8000/bot/respond', {
+      const API = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
+      const token = localStorage.getItem('token') || ''
+      // Try to recover userId from token payload if it's missing in localStorage
+      let userId = Number(localStorage.getItem('userId')) || null
+      if (!userId && token) {
+        try{
+          const payloadBase = token.split('.')[1];
+          const decoded = JSON.parse(decodeURIComponent(escape(window.atob(payloadBase))));
+          if (decoded && decoded.id) {
+            userId = Number(decoded.id) || null
+            if (userId) localStorage.setItem('userId', String(userId))
+          }
+        }catch(e){
+          // ignore
+        }
+      }
+      const headers: any = { 'Content-Type': 'application/json' }
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      const res = await fetch(`${API}/bot/respond`, {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
+        headers,
         body: JSON.stringify({ usuario_origen: userId, mensaje: userMsg, history })
       })
+      if (!res.ok) {
+        // handle unauthorized or other errors gracefully
+        if (res.status === 401) {
+          showToast('Debes iniciar sesión para usar el chatbot.', 'warning')
+          setTimeout(() => navigate('/login'), 1200)
+          setMessages(m=>[...m, {from:'bot', text: 'Debes iniciar sesión para usar el chatbot.'}])
+          return
+        }
+        const errData = await res.json().catch(() => ({}))
+        const msg = errData.detail || 'Error al contactar al chatbot.'
+        setMessages(m=>[...m, {from:'bot', text: msg}])
+        return
+      }
+
       const data = await res.json()
       setMessages(m=>[...m, {from:'bot', text: data.texto}])
       if(data.fallback){
@@ -38,7 +81,7 @@ export default function ChatBot(){
           setWaUrl(data.whatsapp_url)
         } else {
           try{
-            const res2 = await fetch('http://localhost:8000/bot/wa')
+            const res2 = await fetch(`${API}/bot/wa`)
             const d2 = await res2.json()
             setWaUrl(d2.whatsapp_url || null)
             setWaPhone(d2.phone || null)
@@ -50,7 +93,8 @@ export default function ChatBot(){
       } else {
         setWaUrl(null)
       }
-    }catch{
+    }catch(err){
+      console.error('Error enviando mensaje al bot:', err)
       setMessages(m=>[...m, {from:'bot', text: 'Error de conexión al bot.'}])
     } finally {
       setLoading(false)

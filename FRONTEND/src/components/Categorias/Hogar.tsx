@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import NavBar from "../../components/NavBar";
 import "../../assets/css/categorias.css";
+import { useToast } from "../../contexts/useToastContext";
 
 type ProductoCard = {
   id: number;
@@ -13,13 +14,13 @@ type ProductoCard = {
 const Hogar: React.FC = () => {
   const [productos, setProductos] = useState<ProductoCard[]>([]);
   const [loading, setLoading] = useState(true);
+  const { showToast } = useToast();
 
   useEffect(() => {
     async function fetchProductos() {
       try {
-        const res = await fetch(
-          "http://localhost:8000/productos/categoria/hogar/rich"
-        );
+        const API = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
+        const res = await fetch(`${API}/productos/categoria/hogar/rich`);
         if (!res.ok) throw new Error("Error al obtener productos");
         const data = await res.json();
         setProductos(
@@ -31,7 +32,7 @@ const Hogar: React.FC = () => {
               if (v.startsWith('http://') || v.startsWith('https://') || v.startsWith('//')) {
                 imgUrl = v;
               } else {
-                imgUrl = `http://localhost:8000${v}`;
+                imgUrl = `${API}${v}`;
               }
             }
             return {
@@ -53,11 +54,21 @@ const Hogar: React.FC = () => {
   }, []);
 
   function addToCart(product: ProductoCard) {
+    // Verificar si el usuario está logueado
+    const token = localStorage.getItem("token");
+    if (!token) {
+      showToast("Debes iniciar sesión para comprar. Serás redirigido al login.", "warning");
+      setTimeout(() => {
+        window.location.href = "/login";
+      }, 1500);
+      return;
+    }
+
     try {
       const raw = localStorage.getItem("carrito") || "[]";
       const carrito = JSON.parse(raw);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const idx = carrito.findIndex((p: any) => Number(p.id) === Number(product.id));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const idx = carrito.findIndex((p: any) => Number(p.id) === Number(product.id));
       if (idx >= 0) {
         carrito[idx].cantidad = Number(carrito[idx].cantidad || 1) + 1;
       } else {
@@ -70,14 +81,12 @@ const Hogar: React.FC = () => {
         });
       }
       localStorage.setItem("carrito", JSON.stringify(carrito));
-      alert(`${product.nombre} agregado al carrito`);
+      showToast(`${product.nombre} agregado al carrito`, "success");
     } catch (e) {
       console.error(e);
-      alert("No se pudo agregar al carrito");
+      showToast("No se pudo agregar al carrito", "error");
     }
-  }
-
-  return (
+  }  return (
     <div>
       <NavBar />
       <div style={{ maxWidth: 1200, margin: "36px auto", padding: 20 }}>

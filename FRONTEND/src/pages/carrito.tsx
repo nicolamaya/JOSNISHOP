@@ -3,6 +3,8 @@ import "../assets/css/carrito.css";
 import NavBar from "../components/NavBar";
 import "font-awesome/css/font-awesome.min.css";
 import CryptoJS from "crypto-js";
+import { useToast } from "../contexts/useToastContext";
+import ConfirmModal from "../components/ConfirmModal";
 
 type ProductoCarrito = {
   id: number;
@@ -35,6 +37,9 @@ const Carrito: React.FC = () => {
     fecha: "",
     cvv: "",
   });
+  const [cardBrand, setCardBrand] = useState<string>("");
+  const [saveMethod, setSaveMethod] = useState<boolean>(false);
+  const [showSaveConfirm, setShowSaveConfirm] = useState<boolean>(false);
   const [cardError, setCardError] = useState("");
   const [compraExitosa, setCompraExitosa] = useState(false);
   const [showResumen, setShowResumen] = useState(false);
@@ -46,7 +51,10 @@ const Carrito: React.FC = () => {
     cvv: string;
   } | null>(null);
   const [metodoPago, setMetodoPago] = useState<MetodoPago | null>(null);
+  const [seguridadPregunta, setSeguridadPregunta] = useState<string>("");
+  const [seguridadRespuesta, setSeguridadRespuesta] = useState<string>("");
   const usuarioId = localStorage.getItem("userId");
+  const { showToast, showLoading, hideLoading } = useToast();
 
   useEffect(() => {
     let carritoGuardado: ProductoCarrito[] = JSON.parse(
@@ -112,7 +120,34 @@ const Carrito: React.FC = () => {
       }
     }
     fetchMetodoPago();
+    // Fetch user profile to obtain security question (si está disponible)
+    async function fetchUsuario() {
+      if (!usuarioId) return;
+      try {
+        const r = await fetch(`http://localhost:8000/usuarios/${usuarioId}`);
+        if (!r.ok) return;
+        const usuario = await r.json();
+        if (usuario && usuario.seguridad_pregunta) {
+          setSeguridadPregunta(usuario.seguridad_pregunta);
+        }
+      } catch (err) {
+        // fail silently
+      }
+    }
+    fetchUsuario();
   }, [usuarioId]);
+
+  // Detecta la marca de la tarjeta a partir del número (sin espacios)
+  function detectCardBrand(number: string) {
+    if (!number) return "";
+    // American Express
+    if (/^3[47]/.test(number)) return "American Express";
+    // Mastercard (51-55) o (2221-2720)
+    if (/^(5[1-5])/.test(number) || /^(22[2-9]|2[3-6]\d|27[01]|2720)/.test(number)) return "Mastercard";
+    // Visa
+    if (/^4/.test(number)) return "Visa";
+    return "Unknown";
+  }
 
   const handleMenuOpen = () => setMenuOpen(true);
   const handleMenuClose = () => setMenuOpen(false);
@@ -140,7 +175,7 @@ const Carrito: React.FC = () => {
   const handleComprar = async () => {
     const cliente_id = Number(localStorage.getItem("userId"));
     if (!cliente_id || !correo || carrito.length === 0) {
-      alert("Completa todos los datos y agrega productos al carrito.");
+      showToast("Completa todos los datos y agrega productos al carrito.", "warning");
       return;
     }
     const detalles = carrito.map((p) => ({
@@ -150,19 +185,64 @@ const Carrito: React.FC = () => {
     }));
     const total = detalles.reduce((sum, d) => sum + d.subtotal, 0);
 
+    // Verificar respuesta de seguridad si el usuario tiene una pregunta configurada
+    if (seguridadPregunta) {
+      if (!seguridadRespuesta) {
+        showToast("Por favor responde la pregunta de seguridad.", "warning");
+        return;
+      }
+      try {
+        const vr = await fetch(`http://localhost:8000/usuarios/${cliente_id}/verificar-seguridad`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // Enviar la respuesta en texto plano (sin cifrar) para que el backend la compare con el hash bcrypt
+          body: JSON.stringify({ respuesta: seguridadRespuesta.trim() }),
+        });
+        if (!vr.ok) {
+          showToast("Error al verificar la respuesta de seguridad.", "error");
+          return;
+        }
+        const json = await vr.json();
+        // El backend devuelve { msg: "Verificación exitosa" } en caso correcto; soportamos formatos alternativos
+        const valid = json.valid || json.success || json.ok || json.correct || (json.msg && typeof json.msg === 'string' && json.msg.toLowerCase().includes('verific'));
+        if (!valid) {
+          showToast("Respuesta de seguridad incorrecta.", "error");
+          return;
+        }
+      } catch {
+        showToast("Error al verificar la respuesta de seguridad.", "error");
+        return;
+      }
+    }
+
+    // Si no existe un método guardado en el backend, no usamos la tarjeta local (por seguridad)
+    if (!metodoPago && tarjetaGuardada) {
+      showToast("Ingresa CVV o completa los datos de la tarjeta para continuar.", "warning");
+      setShowCardForm(true);
+      return;
+    }
+
     const pago = {
       id_usuario: cliente_id,
-      nombre_tarjeta: tarjetaGuardada?.nombre,
-      numero_tarjeta: tarjetaGuardada?.numero,
-      fecha_expiracion: tarjetaGuardada?.fecha,
-      cvv: tarjetaGuardada?.cvv,
+      nombre_tarjeta: metodoPago?.nombre_tarjeta || tarjetaGuardada?.nombre,
+      numero_tarjeta: metodoPago?.numero_tarjeta || tarjetaGuardada?.numero,
+      fecha_expiracion: metodoPago?.fecha_expiracion || tarjetaGuardada?.fecha,
+      cvv: metodoPago?.cvv || tarjetaGuardada?.cvv,
     };
 
+    let loadingId: string = "";
     try {
+      loadingId = showLoading("Procesando compra...");
       await fetch("http://localhost:8000/pagos/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pago),
+        body: JSON.stringify({
+          ...pago,
+          tipo_pago: "tarjeta_credito",
+          tipo_tarjeta: metodoPago?.nombre_tarjeta || tarjetaGuardada?.nombre || cardBrand || "unknown",
+          monto: Math.round(total * 100),
+          estado: "completado",
+        }),
       });
 
       const res = await fetch("http://localhost:8000/compra", {
@@ -176,11 +256,14 @@ const Carrito: React.FC = () => {
         }),
       });
       if (!res.ok) throw new Error("Error en la compra");
-      alert("Compra realizada con éxito");
+  hideLoading(loadingId, "Compra realizada con éxito", "success");
+      showToast("Compra realizada con éxito", "success");
       setCarrito([]);
       localStorage.removeItem("carrito");
-    } catch {
-      alert("Error al realizar la compra");
+    } catch (err) {
+      console.error(err);
+      hideLoading(loadingId, "Error al realizar la compra", "error");
+      showToast("Error al realizar la compra", "error");
     }
   };
 
@@ -214,38 +297,101 @@ const Carrito: React.FC = () => {
       value = value.replace(/(\d{4})(?=\d)/g, '$1 ');
       // Limitar a 19 caracteres (16 números + 3 espacios)
       value = value.slice(0, 19);
+      // Detectar marca según el número (sin espacios)
+      const raw = value.replace(/\s/g, '');
+      const brand = detectCardBrand(raw);
+      setCardBrand(brand);
+      // Guardamos la marca en el campo nombre (para enviar como nombre_tarjeta)
+      // No se muestra como input al usuario.
+      setCardData({ ...cardData, nombre: brand, [name]: value });
+      return;
     }
 
     setCardData({ ...cardData, [name]: value });
   };
 
   const validateCardData = () => {
-    const { nombre, numero, fecha, cvv } = cardData;
-    if (!nombre.trim()) return "Ingrese el nombre en la tarjeta";
+    const { numero, fecha, cvv } = cardData;
     if (numero.replace(/\s/g, '').length !== 16) return "Número de tarjeta inválido";
     if (!/^\d{2}\/\d{2}$/.test(fecha)) return "Fecha de expiración inválida";
     if (cvv.length !== 3) return "CVV inválido";
     return "";
   };
 
-  const handleCardSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const { nombre, numero, fecha, cvv } = cardData;
-    if (!nombre || !numero || !fecha || !cvv) {
-      setCardError("Por favor completa todos los campos.");
-      return;
-    }
-    setCardError("");
+  // Función que finaliza el proceso de envío de tarjeta: guarda localmente y opcionalmente la envía al backend
+  const finish = async (sendToBackend: boolean) => {
     const userId = localStorage.getItem("userId") || "";
-    const encrypted = CryptoJS.AES.encrypt(
-      JSON.stringify(cardData),
-      SECRET_KEY
-    ).toString();
+    const rawNumber = cardData.numero.replace(/\s/g, '');
+
+    // Guardar localmente cifrado (solo datos no sensibles: máscara del número y expiración)
+    const masked = `**** **** **** ${rawNumber.slice(-4)}`;
+    const localSave = { nombre: cardBrand || cardData.nombre, numero_masked: masked, fecha: cardData.fecha };
+    const encrypted = CryptoJS.AES.encrypt(JSON.stringify(localSave), SECRET_KEY).toString();
     localStorage.setItem(`tarjeta_${userId}`, encrypted);
-    setTarjetaGuardada(cardData);
+    setTarjetaGuardada({ nombre: localSave.nombre, numero: localSave.numero_masked, fecha: localSave.fecha, cvv: "" });
+
+    // Si el usuario marcó guardar y se indicó enviar al backend, lo hacemos
+    if (sendToBackend && userId) {
+      try {
+        await fetch("http://localhost:8000/pagos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id_usuario: Number(userId),
+            nombre_tarjeta: cardBrand || cardData.nombre,
+            numero_tarjeta: rawNumber,
+            fecha_expiracion: cardData.fecha,
+            cvv: cardData.cvv, // CVV se envía solo al backend para tokenización, no se guarda localmente
+            tipo_pago: "tarjeta_credito",
+            tipo_tarjeta: (cardBrand || "unknown").toLowerCase(),
+            monto: Math.round((carrito.reduce((acc, p) => acc + p.precio * p.cantidad, 0) || 0) * 100),
+            estado: "completado",
+            replace_existing: true,
+          }),
+        });
+        // Refrescar método guardado desde backend
+        const res = await fetch(`http://localhost:8000/usuarios/${userId}/metodo-pago`);
+        if (res.ok) {
+          const metodo = await res.json();
+          setMetodoPago(metodo);
+        }
+      } catch (err) {
+        console.error("Error guardando método en backend:", err);
+        showToast("No se pudo guardar el método en el servidor", "warning");
+      }
+    }
+
     setShowCardForm(false);
     setUsarGuardada(true);
     setShowResumen(true);
+  };
+
+  const handleCardSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { numero, fecha, cvv } = cardData;
+    if (!numero || !fecha || !cvv) {
+      setCardError("Por favor completa todos los campos.");
+      return;
+    }
+    const validation = validateCardData();
+    if (validation) {
+      setCardError(validation);
+      return;
+    }
+    setCardError("");
+
+  // Si el usuario decidió guardar el método, pedir confirmación
+
+
+
+    if (saveMethod) {
+      // Abrimos el modal de confirmación; si el usuario confirma, finish(true) será llamado.
+      setShowSaveConfirm(true);
+      return;
+    }
+
+    // Si no pidió guardar, simplemente finalizamos sin enviar al backend
+    await finish(false);
   };
   const handleCambiarMetodo = () => {
     setShowResumen(false);
@@ -255,8 +401,8 @@ const Carrito: React.FC = () => {
 
   const pagar = async () => {
     const cliente_id = Number(localStorage.getItem("userId"));
-    if (!metodoPago || carrito.length === 0 || !correo) {
-      alert("Completa todos los datos y agrega productos al carrito.");
+    if (carrito.length === 0 || !correo) {
+      showToast("Completa todos los datos y agrega productos al carrito.", "warning");
       return;
     }
     const detalles = carrito.map((p) => ({
@@ -265,44 +411,94 @@ const Carrito: React.FC = () => {
       subtotal: p.precio * p.cantidad,
     }));
     const total = detalles.reduce((sum, d) => sum + d.subtotal, 0);
-
-    const pago = {
-      id_usuario: cliente_id,
-      nombre_tarjeta: metodoPago.nombre_tarjeta,
-      numero_tarjeta: metodoPago.numero_tarjeta,
-      fecha_expiracion: metodoPago.fecha_expiracion,
-      cvv: metodoPago.cvv,
-    };
-
+    let loadingId: string = "";
+    // Verificar respuesta de seguridad si corresponde
+    if (seguridadPregunta) {
+      if (!seguridadRespuesta) {
+        showToast("Por favor responde la pregunta de seguridad.", "warning");
+        return;
+      }
+      try {
+        const vr = await fetch(`http://localhost:8000/usuarios/${cliente_id}/verificar-seguridad`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // Enviar la respuesta en texto plano (sin cifrar)
+          body: JSON.stringify({ respuesta: seguridadRespuesta.trim() }),
+        });
+        if (!vr.ok) {
+          showToast("Error al verificar la respuesta de seguridad.", "error");
+          return;
+        }
+        const json = await vr.json();
+        const valid = json.valid || json.success || json.ok || json.correct || (json.msg && typeof json.msg === 'string' && json.msg.toLowerCase().includes('verific'));
+        if (!valid) {
+          showToast("Respuesta de seguridad incorrecta.", "error");
+          return;
+        }
+      } catch {
+        showToast("Error al verificar la respuesta de seguridad.", "error");
+        return;
+      }
+    }
     try {
-      await fetch("http://localhost:8000/pagos/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pago),
-      });
+      loadingId = showLoading("Procesando compra...");
+      // Si existe un método guardado en el backend, usamos 1-clic y no volvemos a enviar datos sensibles
+      if (metodoPago) {
+        const res = await fetch("http://localhost:8000/compra", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cliente_id,
+            detalles,
+            total,
+            correo,
+          }),
+        });
+        if (!res.ok) throw new Error("Error en la compra");
+      } else if (tarjetaGuardada) {
+        // Si no hay método en backend pero hay tarjeta guardada localmente, necesitamos que el usuario
+        // reingrese CVV o datos completos para poder enviar el pago. Abrimos el formulario de tarjeta.
+        showToast("Ingresa CVV o completa los datos de la tarjeta para continuar.", "warning");
+        setShowCardForm(true);
+        return;
+        // Alternativamente, si la tarjeta guardada tuviera datos completos (no recomendado), podríamos enviarla.
+        // Pero por seguridad no almacenamos CVV localmente.
+        // Si el backend tiene método (metodoPago) se usa 1-clic sin CVV.
+      
+      } else {
+        throw new Error("No hay método de pago disponible");
+      }
 
-      const res = await fetch("http://localhost:8000/compra", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cliente_id,
-          detalles,
-          total,
-          correo,
-        }),
-      });
-      if (!res.ok) throw new Error("Error en la compra");
-      alert("Compra realizada con éxito");
+      hideLoading(loadingId, "Compra realizada con éxito", "success");
+      showToast("Compra realizada con éxito", "success");
       setCarrito([]);
       localStorage.removeItem("carrito");
-    } catch {
-      alert("Error al realizar la compra");
+    } catch (err) {
+      console.error(err);
+      hideLoading(loadingId, "Error al realizar la compra", "error");
+      showToast("Error al realizar la compra", "error");
     }
   };
 
   return (
     <div>
       <NavBar onOpenMenu={handleMenuOpen} />
+
+      <ConfirmModal
+        isOpen={showSaveConfirm}
+        title="Guardar método de pago"
+        message="¿Confirmas guardar este método de pago para futuras compras?"
+        confirmText="Aceptar"
+        cancelText="Cancelar"
+        onConfirm={async () => {
+          setShowSaveConfirm(false);
+          await finish(true);
+        }}
+        onCancel={async () => {
+          setShowSaveConfirm(false);
+          await finish(false);
+        }}
+      />
 
       {/* Menú hamburguesa lateral */}
       <nav className={`hamburger-menu${menuOpen ? " active" : ""}`}>
@@ -576,21 +772,23 @@ const Carrito: React.FC = () => {
           <div className="tarjeta-modal">
             <h2>Datos de la tarjeta</h2>
             <form className="tarjeta-form" onSubmit={handleCardSubmit}>
-              <div className="tarjeta-field">
-                <label className="tarjeta-label">Nombre en la tarjeta</label>
-                <input
-                  type="text"
-                  name="nombre"
-                  className="tarjeta-input"
-                  placeholder="Nombre como aparece en la tarjeta"
-                  value={cardData.nombre}
-                  onChange={handleCardInput}
-                  required
-                />
-              </div>
-
-              <div className="tarjeta-field">
-                <label className="tarjeta-label">Número de tarjeta</label>
+              <div className="tarjeta-field tarjeta-numero-field" style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                <label className="tarjeta-label" style={{minWidth: 140}}>Número de tarjeta</label>
+                {cardBrand && (
+                  <img
+                    src={
+                      cardBrand === 'Visa'
+                        ? 'https://upload.wikimedia.org/wikipedia/commons/4/41/Visa_Logo.png'
+                        : cardBrand === 'Mastercard'
+                        ? 'https://upload.wikimedia.org/wikipedia/commons/0/04/Mastercard-logo.png'
+                        : cardBrand === 'American Express'
+                        ? 'https://upload.wikimedia.org/wikipedia/commons/3/30/American_Express_logo_%282018%29.svg'
+                        : 'https://upload.wikimedia.org/wikipedia/commons/6/6b/Credit_card_font_awesome.svg'
+                    }
+                    alt={cardBrand}
+                    style={{width: 36, height: 24}}
+                  />
+                )}
                 <input
                   type="text"
                   name="numero"
@@ -600,6 +798,7 @@ const Carrito: React.FC = () => {
                   onChange={handleCardInput}
                   required
                   maxLength={19}
+                  style={{flex: 1}}
                 />
               </div>
 
@@ -634,7 +833,16 @@ const Carrito: React.FC = () => {
               </div>
 
               {cardError && <span className="tarjeta-error">{cardError}</span>}
-              
+              <div style={{display: 'flex', alignItems: 'center', gap: 8, marginTop: 8}}>
+                <label style={{display: 'flex', alignItems: 'flex-start', gap: 8}}>
+                  <input type="checkbox" checked={saveMethod} onChange={(e) => setSaveMethod(e.target.checked)} />
+                  <div style={{fontSize: 13}}>
+                    <div><b>Guardar la tarjeta para futuras compras.</b></div>
+                    <div style={{color: '#888'}}>Esto no afectará la forma en la que pagas por las suscripciones existentes y lo puedes administrar en tu cuenta.</div>
+                  </div>
+                </label>
+              </div>
+
               <div className="tarjeta-buttons">
                 <button type="submit" className="tarjeta-continuar">
                   Continuar
@@ -679,10 +887,28 @@ const Carrito: React.FC = () => {
                   type="email"
                   value={correo}
                   onChange={(e) => setCorreo(e.target.value)}
+                  placeholder="tu@correo.com"
                   required
                 />
-                <button onClick={pagar}>Confirmar compra</button>
-                <button onClick={() => setShowModal(false)}>Cancelar</button>
+                {seguridadPregunta && (
+                  <div className="security-question-group">
+                    <label className="security-label">
+                      <i className="fa-solid fa-lock" style={{ marginRight: 8, color: '#00b86b' }}></i>
+                      {seguridadPregunta}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Escribe tu respuesta"
+                      value={seguridadRespuesta}
+                      onChange={(e) => setSeguridadRespuesta(e.target.value)}
+                      className="security-input"
+                    />
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <button onClick={pagar} className="btn-confirmar">Confirmar compra</button>
+                  <button onClick={() => setShowModal(false)} className="btn-cancelar">Cancelar</button>
+                </div>
               </>
             )}
           </div>
@@ -712,10 +938,24 @@ const Carrito: React.FC = () => {
               type="email"
               value={correo}
               onChange={(e) => setCorreo(e.target.value)}
+              placeholder="tu@correo.com"
               required
-              placeholder="Correo para confirmación"
-              style={{ marginBottom: 8 }}
             />
+            {seguridadPregunta && (
+              <div className="security-question-group">
+                <label className="security-label">
+                  <i className="fa-solid fa-lock" style={{ marginRight: 8, color: '#00b86b' }}></i>
+                  {seguridadPregunta}
+                </label>
+                <input
+                  type="text"
+                  placeholder="Escribe tu respuesta"
+                  value={seguridadRespuesta}
+                  onChange={(e) => setSeguridadRespuesta(e.target.value)}
+                  className="security-input"
+                />
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={handleComprar} className="btn-confirmar">
                 Finalizar compra

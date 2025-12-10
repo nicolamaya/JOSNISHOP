@@ -35,9 +35,9 @@ const Ventas: React.FC = () => {
       if (type === "anio") {
         // Consultar cada mes del año
         const promesas = MESES.map((_, index) => 
-          axios.get<{ TotalVentasMensuales?: number }[]>(`http://localhost:8000/ventas?anio=${anio}&mes=${index + 1}`)
+          axios.get(`http://localhost:8000/ventas?anio=${anio}&mes=${index + 1}`)
             .then(res => {
-              const data = res.data[0] as { TotalVentasMensuales?: number };
+              const data = (res.data as any[])[0] as { TotalVentasMensuales?: number };
               return {
                 mes: index + 1,
                 nombre: MESES[index],
@@ -71,8 +71,8 @@ const Ventas: React.FC = () => {
       } else if (type === "mes") {
         // Consultar un mes específico (días)
         const params = `?anio=${anio}&mes=${mes}`;
-        const res = await axios.get<{ TotalVentasMensuales?: number }[]>(`http://localhost:8000/ventas${params}`);
-        const data = res.data[0] as { TotalVentasMensuales?: number };
+        const res = await axios.get(`http://localhost:8000/ventas${params}`);
+        const data = (res.data as any[])[0] as { TotalVentasMensuales?: number };
         setVentasData([{
           mes: mes || 1,
           nombre: MESES[mes ? mes - 1 : 0],
@@ -82,8 +82,8 @@ const Ventas: React.FC = () => {
       } else {
         // Consultar un día específico
         const params = `?anio=${anio}${mes ? `&mes=${mes}` : ''}${dia ? `&dia=${dia}` : ''}`;
-        const res = await axios.get<{ TotalVentasDiarias?: number }[]>(`http://localhost:8000/ventas${params}`);
-        const data = res.data[0] as { TotalVentasDiarias?: number };
+        const res = await axios.get(`http://localhost:8000/ventas${params}`);
+        const data = (res.data as any[])[0] as { TotalVentasDiarias?: number };
         setVentasData([{
           mes: 1,
           nombre: `Día ${dia || 1}`,
@@ -347,7 +347,7 @@ const Ventas: React.FC = () => {
             (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 4px 6px #00000015";
           }}
         >
-           Consultar
+          Consultar
         </button>
       </div>
 
@@ -459,7 +459,7 @@ const Ventas: React.FC = () => {
                     },
                     grid: {
                       color: '#f0f0f0',
-                      display: false
+                      drawBorder: false
                     }
                   },
                   x: {
@@ -504,7 +504,7 @@ const Ventas: React.FC = () => {
           border: '2px dashed #ddd'
         }}>
           <p style={{ color: '#999', fontSize: '1.1rem' }}>
-            👆 Selecciona los parámetros y haz clic en "Consultar" para ver tu análisis de ventas
+            Selecciona los parámetros y haz clic en "Consultar" para ver tu análisis de ventas
           </p>
         </div>
       )}

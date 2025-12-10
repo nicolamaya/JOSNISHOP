@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import ResenasProducto from "./ResenasProducto";
 import "../../assets/css/producto_sele/Producto_selec.css";
 import NavBar from "../NavBar";
+import { useToast } from "../../contexts/useToastContext";
 
 type Producto = {
   id: number;
@@ -43,40 +44,60 @@ const ProductoDetalle: React.FC = () => {
   const innerRef = useRef<HTMLDivElement | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   useEffect(() => {
     if (!productoId) return;
     (async () => {
+      // Get api base from environment (Vite). If not set, default to backend address.
+      const API = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
       try {
         // fetch basic producto
-        const res = await fetch(`http://127.0.0.1:8000/productos/${productoId}`);
+        const res = await fetch(`${API}/productos/${productoId}`);
         if (res.ok) {
-          const data = await res.json();
-          setProducto(data);
+          // Try parse JSON only if response is JSON
+          const ct = res.headers.get('content-type') || '';
+          let data: any = null;
+          if (ct.includes('application/json')) {
+            data = await res.json();
+            setProducto(data);
+            console.debug('Producto data:', data);
+          } else {
+            const text = await res.text();
+            console.error('Producto endpoint returned non-JSON:', text);
+          }
         }
       } catch (err) {
         console.error("Error cargando producto", err);
       }
 
       try {
-        const res2 = await fetch(`http://127.0.0.1:8000/productos/rich`);
+        const res2 = await fetch(`${API}/productos/rich`);
         if (res2.ok) {
-          const list: ProductoRich[] = await res2.json();
+          const ct2 = res2.headers.get('content-type') || '';
+          let list: ProductoRich[] = [];
+          if (ct2.includes('application/json')) {
+            list = await res2.json();
+          } else {
+            const text = await res2.text();
+            console.error('productos/rich returned non-JSON:', text);
+          }
           const found = list.find((p) => p.id === productoId);
-          if (found) {
+            if (found) {
             setPrecio(found.precio ?? null);
             // if found.image is absolute (http/https or protocol-relative //) use it as-is,
             // otherwise prefix with backend host for relative paths
             let imgUrl: string | null = null;
             if (found.image) {
               const v = String(found.image).trim();
-              if (v.startsWith('http://') || v.startsWith('https://') || v.startsWith('//')) {
+                if (v.startsWith('http://') || v.startsWith('https://') || v.startsWith('//')) {
                 imgUrl = v;
               } else {
-                imgUrl = `http://127.0.0.1:8000${v}`;
+                imgUrl = `${API || ''}${v}`;
               }
             }
             setImg(imgUrl);
+            console.debug('Precio e imagen desde rich:', {precio: found.precio, imgUrl});
           }
         }
       } catch (err) {
@@ -84,12 +105,20 @@ const ProductoDetalle: React.FC = () => {
       }
       // fetch inventory for this product and compute available quantity
       try {
-        const invRes = await fetch(`http://127.0.0.1:8000/inventarios/reportes?producto_id=${productoId}`);
+        const invRes = await fetch(`${API}/inventarios/reportes?producto_id=${productoId}`);
         if (invRes.ok) {
-          const invList: InventarioItem[] = await invRes.json();
+          const ct3 = invRes.headers.get('content-type') || '';
+          let invList: InventarioItem[] = [];
+          if (ct3.includes('application/json')) {
+            invList = await invRes.json();
+          } else {
+            const text = await invRes.text();
+            console.error('inventarios/reportes returned non-JSON:', text);
+          }
           // invList is an array of inventories with `cantidad`
           const total = Array.isArray(invList) ? invList.reduce((s: number, it: InventarioItem) => s + (Number(it.cantidad) || 0), 0) : 0;
           setAvailableCount(total);
+          console.debug('Inventario para producto', productoId, invList, 'total', total);
         }
       } catch (e) {
         console.error('Error cargando inventario', e);
@@ -100,12 +129,16 @@ const ProductoDetalle: React.FC = () => {
   const handleAddToCart = () => {
     const token = localStorage.getItem("token");
     if (!token) {
-      navigate('/login');
+      // Show a toast like in category pages, then redirect after a short delay
+      showToast("Debes iniciar sesión para comprar. Serás redirigido al login.", "warning");
+      setTimeout(() => {
+        navigate('/login');
+      }, 1500);
       return;
     }
     // if we have inventory info, prevent adding more than available
     if (availableCount !== null && cantidad > availableCount) {
-      alert(`Solo hay ${availableCount} unidad(es) disponibles.`);
+      showToast(`Solo hay ${availableCount} unidad(es) disponibles.`, "warning");
       return;
     }
     const prod: CarritoItem = {

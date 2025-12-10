@@ -3,14 +3,25 @@ import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react"; // <-- Agrega esto
 import "../assets/css/register.css";
 import video from "../assets/IMG/inicio_video.mp4";
+import { useToast } from "../contexts/useToastContext";
 
 const Registro: React.FC = () => {
+  const SECRET_KEY = "Josnishop el mejor";
   const [formData, setFormData] = useState({
     nombre: "",
     email: "",
     rol: "",
     password: "",
     confirmPassword: "",
+  });
+  // Añadimos nuevos campos solicitados: tipo/numero de documento, fecha de nacimiento y pregunta de seguridad
+  const [extra, setExtra] = useState({
+    tipo_documento: "",
+    numero_documento: "",
+    fecha_nacimiento: "",
+    seguridad_pregunta: "",
+    seguridad_respuesta: "",
+    customQuestion: "",
   });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -19,11 +30,16 @@ const Registro: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleExtraChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    setExtra({ ...extra, [e.target.name]: e.target.value });
   };
 
   const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -34,13 +50,40 @@ const Registro: React.FC = () => {
     e.preventDefault();
     setError("");
     setSuccess("");
+
+    // Verificar campos obligatorios (todos deben completarse)
+    if (!formData.nombre || !formData.email || !formData.rol || !formData.password || !formData.confirmPassword) {
+      setError("Por favor completa todos los campos personales obligatorios.");
+      return;
+    }
+
+    // Validación de campos adicionales
+    if (!extra.tipo_documento || !extra.numero_documento || !extra.fecha_nacimiento) {
+      setError("Por favor completa los datos adicionales de documento y fecha de nacimiento.");
+      return;
+    }
+
+    if (!extra.seguridad_pregunta) {
+      setError("Selecciona una pregunta de seguridad.");
+      return;
+    }
+    if (extra.seguridad_pregunta === 'Otro' && !extra.customQuestion) {
+      setError("Escribe tu pregunta de seguridad personalizada.");
+      return;
+    }
+    if (!extra.seguridad_respuesta) {
+      setError("Por favor ingresa la respuesta de seguridad.");
+      return;
+    }
+
     if (!acceptedTerms) {
       setError("Debes aceptar los términos y condiciones para continuar.");
       return;
     }
+
     // Validación de contraseña: mínimo 8 caracteres, una mayúscula, un número y un símbolo
     const validatePassword = (pwd: string) => {
-      const re = /^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+=\[\]{};:'".,<>\/\\?\\|`~]).{8,}$/;
+      const re = /^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+=\[\]{};:'".,<>\\/?\\|`~]).{8,}$/;
       return re.test(pwd);
     };
     if (!validatePassword(formData.password)) {
@@ -53,36 +96,62 @@ const Registro: React.FC = () => {
       setError("Las contraseñas no coinciden");
       return;
     }
+
     // Determinar el rol_id según la selección
     let rol_id = 1;
     if (formData.rol === "cliente") {
       rol_id = 2;
     }
-    const res = await fetch("http://localhost:8000/usuarios/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        nombre: formData.nombre,
-        correo: formData.email,
-        contraseña: formData.password,
-        rol_id: rol_id,
-      }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      setSuccess("Usuario registrado correctamente");
-      setFormData({
-        nombre: "",
-        email: "",
-        rol: "",
-        password: "",
-        confirmPassword: "",
+
+    // Enviar la respuesta de seguridad en texto plano para que el backend la hashee con bcrypt
+    try {
+      const preguntaToSend = extra.seguridad_pregunta === 'Otro' ? extra.customQuestion : extra.seguridad_pregunta;
+      const respuestaToSend = String(extra.seguridad_respuesta).trim();
+
+      const res = await fetch("http://localhost:8000/usuarios/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nombre: formData.nombre,
+          correo: formData.email,
+          contraseña: formData.password,
+          rol_id: rol_id,
+          tipo_documento: extra.tipo_documento,
+          numero_documento: extra.numero_documento,
+          fecha_nacimiento: extra.fecha_nacimiento,
+          seguridad_pregunta: preguntaToSend,
+          seguridad_respuesta: respuestaToSend,
+        }),
       });
-      // Mostrar alerta y luego redirigir
-      alert("Registro exitoso");
-      navigate("/login");
-    } else {
-      setError(data.detail || "Error al registrar usuario");
+      const data = await res.json();
+      if (res.ok) {
+        setSuccess("Usuario registrado correctamente");
+        setFormData({
+          nombre: "",
+          email: "",
+          rol: "",
+          password: "",
+          confirmPassword: "",
+        });
+        setExtra({
+          tipo_documento: "",
+          numero_documento: "",
+          fecha_nacimiento: "",
+          seguridad_pregunta: "",
+          seguridad_respuesta: "",
+          customQuestion: "",
+        });
+        // Mostrar toast y luego redirigir
+        showToast("¡Registro exitoso! Redirigiendo al login...", "success");
+        setTimeout(() => navigate("/login"), 1500);
+      } else {
+        showToast(data.detail || "Error al registrar usuario", "error");
+        setError(data.detail || "Error al registrar usuario");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Error al registrar usuario", "error");
+      setError("Error al registrar usuario");
     }
   };
 
@@ -199,7 +268,47 @@ const Registro: React.FC = () => {
             </button>
           </div>
 
-          <div className="registro-terms-container">
+
+          <h3>Datos adicionales</h3>
+          <label htmlFor="tipo_documento">Tipo de documento <span style={{ color: 'red' }}>*</span></label>
+          <select id="tipo_documento" name="tipo_documento" value={extra.tipo_documento} onChange={handleExtraChange} className="registro-input-field" required>
+            <option value="">Selecciona</option>
+            <option value="CC">Cédula de ciudadanía (CC)</option>
+            <option value="TI">Tarjeta de identidad (TI)</option>
+            <option value="CE">Cédula de extranjería (CE)</option>
+            <option value="Pasaporte">Pasaporte</option>
+            <option value="NIT">NIT</option>
+          </select>
+
+          <label htmlFor="numero_documento">Número de documento <span style={{ color: 'red' }}>*</span></label>
+          <input id="numero_documento" name="numero_documento" value={extra.numero_documento} onChange={handleExtraChange} className="registro-input-field" required />
+
+          <label htmlFor="fecha_nacimiento">Fecha de nacimiento <span style={{ color: 'red' }}>*</span></label>
+          <input id="fecha_nacimiento" name="fecha_nacimiento" type="date" value={extra.fecha_nacimiento} onChange={handleExtraChange} className="registro-input-field" required />
+
+          <label htmlFor="seguridad_pregunta">Pregunta de seguridad</label>
+          <select id="seguridad_pregunta" name="seguridad_pregunta" value={extra.seguridad_pregunta} onChange={handleExtraChange} className="registro-input-field" required>
+            <option value="">Selecciona una pregunta</option>
+            <option value="Nombre de tu primera mascota">Nombre de tu primera mascota</option>
+            <option value="Ciudad de nacimiento">Ciudad de nacimiento</option>
+            <option value="Nombre de la escuela primaria">Nombre de la escuela primaria</option>
+            <option value="Nombre de tu madre">Nombre de tu madre</option>
+            <option value="Color favorito">Color favorito</option>
+            <option value="Nombre del primer profesor">Nombre del primer profesor</option>
+            <option value="Otro">Otro (escribe tu propia pregunta)</option>
+          </select>
+
+          {extra.seguridad_pregunta === 'Otro' && (
+            <>
+              <label htmlFor="customQuestion">Escribe tu pregunta</label>
+              <input id="customQuestion" name="customQuestion" value={extra.customQuestion} onChange={handleExtraChange} className="registro-input-field" required />
+            </>
+          )}
+
+          <label htmlFor="seguridad_respuesta">Respuesta de seguridad <span style={{ color: 'red' }}>*</span></label>
+          <input id="seguridad_respuesta" name="seguridad_respuesta" value={extra.seguridad_respuesta} onChange={handleExtraChange} className="registro-input-field" required />
+
+          <div className="registro-terms-container" style={{ marginTop: 12 }}>
             <input
               type="checkbox"
               id="acceptTerms"

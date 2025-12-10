@@ -1,35 +1,23 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "../assets/css/recuperar.css";
 import logo from "/logo.png";
 import video from "../assets/IMG/inicio_video.mp4";
+import { useToast } from "../contexts/useToastContext";
 
 const RecuperarContrasena: React.FC = () => {
   const [email, setEmail] = useState("");
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-
-  // Redirige al login tras mostrar el mensaje
-  useEffect(() => {
-    if (message) {
-      const timer = setTimeout(() => {
-        navigate("/login");
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [message, navigate]);
+  const { showToast } = useToast();
 
   // Manejo del formulario
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.includes("@")) {
-      setError("Por favor ingresa un correo válido.");
+      showToast("Por favor ingresa un correo válido.", "warning");
       return;
     }
-    setError("");
-    setMessage("");
     setLoading(true);
 
     try {
@@ -47,14 +35,15 @@ const RecuperarContrasena: React.FC = () => {
       const data = await response.json();
 
       if (response.ok) {
-        setMessage(
-          "Si el correo está registrado, recibirás la nueva contraseña en tu correo."
-        );
+        showToast("Si el correo está registrado, recibirás la nueva contraseña en tu correo.", "success");
+        setTimeout(() => {
+          navigate("/login");
+        }, 2000);
       } else {
-        setError(data.detail || "No se pudo recuperar la contraseña.");
+        showToast(data.detail || "No se pudo recuperar la contraseña.", "error");
       }
     } catch {
-      setError("Error de conexión con el servidor.");
+      showToast("Error de conexión con el servidor.", "error");
     }
     setLoading(false);
   };
@@ -107,8 +96,6 @@ const RecuperarContrasena: React.FC = () => {
             style={{ marginBottom: "12px" }}
           />
 
-          {error && <div className="error-message" style={{ marginBottom: "12px" }}>{error}</div>}
-
           <button
             type="submit"
             id="sendRecoveryBtn"
@@ -119,18 +106,6 @@ const RecuperarContrasena: React.FC = () => {
           </button>
         </form>
 
-        {message && (
-          <div
-            id="recoveryMessage"
-            style={{
-              color: "#1ebc7c",
-              textAlign: "center",
-              marginTop: "18px",
-            }}
-          >
-            {message}
-          </div>
-        )}
         <div style={{ marginTop: "2rem", textAlign: "center" }}>
           <div style={{ background: '#fff9b1', padding: '8px 12px', borderRadius: '6px', display: 'inline-block' }}>
             <span style={{ color: '#222', fontSize: '1.08rem' }}>

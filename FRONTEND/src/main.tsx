@@ -6,9 +6,12 @@ import App from './App.tsx'
 import Registro from './pages/register'
 import RecuperarContrasena from './pages/recuperar_contrasena';
 import "font-awesome/css/font-awesome.min.css";
+import "./assets/css/animations.css";
+import "./assets/css/component-animations.css";
 import Panel from "./pages/Panel";
 import Inicio from "./pages/inicio";
 import Categorias from "./pages/categorias";
+import ProtectedRoute from "./components/ProtectedRoute";
 import Hogar from "./components/Categorias/Hogar";
 import Accesorios from "./components/Categorias/Accesorios";
 import Bisuteria from "./components/Categorias/Bisuteria";
@@ -40,16 +43,18 @@ import Carrito from './pages/carrito.tsx';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 import ResenasPanel from "./components/panel/resenas.tsx";
 import Ventas from "./components/panel/Ventas";
+import { ToastProvider } from "./contexts/ToastContext";
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <ToastProvider>
+      <BrowserRouter>
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Registro />} />
         <Route path="/recuperar_contrasena" element={<RecuperarContrasena />} />
-        <Route path="/panel" element={<Panel />} />
+        <Route path="/panel" element={<ProtectedRoute element={<Panel />} />} />
         <Route path="/inicio" element={<Inicio />} />
         <Route path="/categorias" element={<Categorias />} />
   <Route path="/categoria/hogar" element={<Hogar />} />
@@ -84,5 +89,6 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/ventas" element={<Ventas />} />
       </Routes>
     </BrowserRouter>
+    </ToastProvider>
   </StrictMode>,
 )

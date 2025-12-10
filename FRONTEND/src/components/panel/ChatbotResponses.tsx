@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { useToast } from "../../contexts/useToastContext";
 
 type Resp = {
   id: number;
@@ -13,22 +14,63 @@ type Resp = {
 
 const ChatbotResponses: React.FC = () => {
   const [items, setItems] = useState<Resp[]>([]);
+  const [filteredItems, setFilteredItems] = useState<Resp[]>([]);
   const [form, setForm] = useState({ clave: "", respuesta: "", prioridad: 0, enabled: true });
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
+  const { showToast } = useToast();
 
-  const load = async () => {
+  // Estados para los filtros
+  const [filterClave, setFilterClave] = useState("");
+  const [filterRespuesta, setFilterRespuesta] = useState("");
+  const [filterPrioridad, setFilterPrioridad] = useState<number | "">("");
+  const [filterEnabled, setFilterEnabled] = useState<boolean | "">("");
+
+  const load = useCallback(async () => {
     try {
       const res = await axios.get<Resp[]>("http://localhost:8000/bot/responses/");
       setItems(res.data);
+      setFilteredItems(res.data);
     } catch (e) {
       console.error(e);
-      alert("Error cargando respuestas (revisa backend)");
+      showToast("Error cargando respuestas (revisa backend)", "error");
     }
-  };
+  }, [showToast]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
+  const applyFilters = useCallback(() => {
+    let filtered = items;
+
+    if (filterClave) {
+      filtered = filtered.filter(r =>
+        r.clave.toLowerCase().includes(filterClave.toLowerCase())
+      );
+    }
+
+    if (filterRespuesta) {
+      filtered = filtered.filter(r =>
+        r.respuesta.toLowerCase().includes(filterRespuesta.toLowerCase())
+      );
+    }
+
+    if (filterPrioridad !== "") {
+      filtered = filtered.filter(r => r.prioridad === filterPrioridad);
+    }
+
+    if (filterEnabled !== "") {
+      filtered = filtered.filter(r => r.enabled === filterEnabled);
+    }
+
+    setFilteredItems(filtered);
+  }, [items, filterClave, filterRespuesta, filterPrioridad, filterEnabled]);
+
+  useEffect(() => { load(); }, [showToast]);
+
+  // Ejecutar filtros cuando cambie alguno
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -43,7 +85,7 @@ const ChatbotResponses: React.FC = () => {
       load();
     } catch (err) {
       console.error(err);
-      alert("Error al guardar");
+      showToast("Error al guardar", "error");
     }
   };
 
@@ -64,7 +106,7 @@ const ChatbotResponses: React.FC = () => {
       load();
     } catch (err) {
       console.error(err);
-      alert('Error al eliminar');
+      showToast('Error al eliminar', 'error');
     }
   };
 
@@ -77,6 +119,14 @@ const ChatbotResponses: React.FC = () => {
   const openEdit = (it: Resp) => {
     handleEdit(it);
     setShowModal(true);
+  };
+
+  // Limpiar filtros
+  const clearFilters = () => {
+    setFilterClave("");
+    setFilterRespuesta("");
+    setFilterPrioridad("");
+    setFilterEnabled("");
   };
 
   const downloadPdf = () => {
@@ -101,12 +151,12 @@ const ChatbotResponses: React.FC = () => {
       doc.text(mensajeLines, 40, 100);
 
       const startY = 120 + mensajeLines.length * 12;
-      if (items.length === 0) {
+      if (filteredItems.length === 0) {
         doc.setFontSize(12);
         doc.text('No hay respuestas para mostrar.', 40, startY);
       } else {
         const headers = [["Clave", "Respuesta", "Prioridad", "Enabled"]];
-        const rows = items.map(i => [i.clave, i.respuesta, String(i.prioridad), i.enabled ? 'Sí' : 'No']);
+        const rows = filteredItems.map(i => [i.clave, i.respuesta, String(i.prioridad), i.enabled ? 'Sí' : 'No']);
         autoTable(doc, {
           head: headers,
           body: rows,
@@ -152,6 +202,122 @@ const ChatbotResponses: React.FC = () => {
             <button className="btn-save" onClick={downloadPdf}>Descargar PDF</button>
           </div>
         </div>
+
+        {/* Sección de Filtros */}
+        <div style={{
+          background: '#f5f5f5',
+          padding: '16px',
+          borderRadius: '8px',
+          marginBottom: '20px',
+          border: '1px solid #ddd'
+        }}>
+          <h3 style={{ margin: '0 0 16px 0', color: '#054d25', fontSize: '16px' }}>Filtros</h3>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+            gap: '16px',
+            marginBottom: '16px'
+          }}>
+            {/* Filtro por Clave */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                Clave
+              </label>
+              <input
+                type="text"
+                placeholder="Buscar por clave..."
+                value={filterClave}
+                onChange={(e) => setFilterClave(e.target.value)}
+                className="form-input"
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            {/* Filtro por Respuesta */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                Respuesta
+              </label>
+              <input
+                type="text"
+                placeholder="Buscar por respuesta..."
+                value={filterRespuesta}
+                onChange={(e) => setFilterRespuesta(e.target.value)}
+                className="form-input"
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            {/* Filtro por Prioridad */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                Prioridad
+              </label>
+              <select
+                value={filterPrioridad}
+                onChange={(e) => setFilterPrioridad(e.target.value === "" ? "" : Number(e.target.value))}
+                className="form-input"
+                style={{ width: '100%' }}
+              >
+                <option value="">Todas</option>
+                <option value="0">0</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+              </select>
+            </div>
+
+            {/* Filtro por Enabled */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#333' }}>
+                Estado
+              </label>
+              <div style={{ display: 'flex', gap: '12px', flexDirection: 'column' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="enabled"
+                    checked={filterEnabled === ""}
+                    onChange={() => setFilterEnabled("")}
+                  />
+                  <span>Todos</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="enabled"
+                    checked={filterEnabled === true}
+                    onChange={() => setFilterEnabled(true)}
+                  />
+                  <span>Habilitado</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="enabled"
+                    checked={filterEnabled === false}
+                    onChange={() => setFilterEnabled(false)}
+                  />
+                  <span>Deshabilitado</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={clearFilters}
+            className="btn-delete"
+            style={{ padding: '8px 16px', fontSize: '14px' }}
+          >
+            Limpiar filtros
+          </button>
+
+          <p style={{ margin: '12px 0 0 0', color: '#666', fontSize: '14px' }}>
+            Mostrando {filteredItems.length} de {items.length} respuestas
+          </p>
+        </div>
+
         <div className="table-container">
           <div style={{ padding: 8 }}>
             <table className="custom-table">
@@ -165,7 +331,7 @@ const ChatbotResponses: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {items.map(it => (
+                {filteredItems.map(it => (
                   <tr key={it.id}>
                     <td>{it.clave}</td>
                     <td style={{ whiteSpace: 'pre-wrap' }}>{it.respuesta}</td>

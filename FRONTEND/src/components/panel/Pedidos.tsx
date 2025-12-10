@@ -1,7 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import { motion } from "framer-motion";
 import '../../assets/css/pedido.css';
+import '../../assets/css/pedido-timeline.css';
+import { useToast } from "../../contexts/useToastContext";
+import ConfirmModal from "../ConfirmModal";
+import PedidoTimeline from "./PedidoTimeline";
 
 interface Pedido {
   id_pedido: number;
@@ -26,16 +30,22 @@ interface PedidosProps {
 
 const Pedidos: React.FC<PedidosProps> = ({ setSelectedPedidoId }) => {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
+  const [filteredPedidos, setFilteredPedidos] = useState<Pedido[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Modal state for editing pedido status
-  const [editingPedido, setEditingPedido] = useState<Pedido | null>(null);
-  const [nuevoEstadoModal, setNuevoEstadoModal] = useState<string>("Procesando");
+  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const { showToast } = useToast();
+
+  // Estados para los filtros
+  const [filterEstado, setFilterEstado] = useState("");
+  const [filterClienteId, setFilterClienteId] = useState<number | "">("");
+  const [filterFechaDesde, setFilterFechaDesde] = useState("");
+  const [filterFechaHasta, setFilterFechaHasta] = useState("");
+  const [filterTotalMin, setFilterTotalMin] = useState<number | "">("");
+  const [filterTotalMax, setFilterTotalMax] = useState<number | "">("");
 
   const userId = localStorage.getItem("userId");
-  // El vendedor es solo el usuario con id 1
-  // El resto son clientes
-  // userRole ya no se usa para decidir la URL
+  const isVendedor = userId === "1";
 
   useEffect(() => {
     if (!userId) {
@@ -52,6 +62,7 @@ const Pedidos: React.FC<PedidosProps> = ({ setSelectedPedidoId }) => {
       .get<Pedido[]>(url)
       .then((res) => {
         setPedidos(res.data);
+        setFilteredPedidos(res.data);
         setLoading(false);
       })
       .catch((err) => {
@@ -61,114 +72,321 @@ const Pedidos: React.FC<PedidosProps> = ({ setSelectedPedidoId }) => {
       });
   }, [userId]);
 
+  // Aplicar filtros
+  const applyFilters = useCallback(() => {
+    let filtered = pedidos;
+
+    if (filterEstado) {
+      filtered = filtered.filter(p =>
+        p.estado.toLowerCase().includes(filterEstado.toLowerCase())
+      );
+    }
+
+    if (filterClienteId !== "") {
+      filtered = filtered.filter(p => p.cliente_id === filterClienteId);
+    }
+
+    if (filterFechaDesde) {
+      const fechaDesde = new Date(filterFechaDesde);
+      filtered = filtered.filter(p => new Date(p.fecha_pedido) >= fechaDesde);
+    }
+
+    if (filterFechaHasta) {
+      const fechaHasta = new Date(filterFechaHasta);
+      fechaHasta.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(p => new Date(p.fecha_pedido) <= fechaHasta);
+    }
+
+    if (filterTotalMin !== "") {
+      filtered = filtered.filter(p => p.total >= filterTotalMin);
+    }
+
+    if (filterTotalMax !== "") {
+      filtered = filtered.filter(p => p.total <= filterTotalMax);
+    }
+
+    setFilteredPedidos(filtered);
+  }, [pedidos, filterEstado, filterClienteId, filterFechaDesde, filterFechaHasta, filterTotalMin, filterTotalMax]);
+
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
+
+  // Limpiar filtros
+  const clearFilters = () => {
+    setFilterEstado("");
+    setFilterClienteId("");
+    setFilterFechaDesde("");
+    setFilterFechaHasta("");
+    setFilterTotalMin("");
+    setFilterTotalMax("");
+  };
+
   const handleDelete = async (id: number) => {
-    if (userId !== "1") return;
-    if (!window.confirm("¿Seguro que deseas eliminar este pedido?")) return;
+    if (!isVendedor) return;
+    setDeleteConfirm(id);
+  };
+
+  const confirmDelete = async () => {
+    if (deleteConfirm === null) return;
     try {
-      await axios.delete(`http://localhost:8000/pedidos/${id}`);
-      setPedidos(pedidos.filter((p) => p.id_pedido !== id));
+      await axios.delete(`http://localhost:8000/pedidos/${deleteConfirm}`);
+      setPedidos(pedidos.filter((p) => p.id_pedido !== deleteConfirm));
+      showToast("Pedido eliminado correctamente", "success");
     } catch (err) {
       console.error("Error al eliminar pedido:", err);
-      setError("Error al eliminar pedido. Inténtalo de nuevo.");
+      showToast("Error al eliminar pedido. Inténtalo de nuevo.", "error");
     }
+    setDeleteConfirm(null);
   };
 
-  const abrirEditarEstado = (pedido: Pedido) => {
-    setEditingPedido(pedido);
-    setNuevoEstadoModal(pedido.estado);
-  };
-
-  const cerrarEditarEstado = () => {
-    setEditingPedido(null);
-  };
-
-  const guardarEstado = async () => {
-    if (!editingPedido) return;
-    try {
-      await axios.put(`http://localhost:8000/pedidos/${editingPedido.id_pedido}`, { estado: nuevoEstadoModal });
-      setPedidos(prev => prev.map(p => p.id_pedido === editingPedido.id_pedido ? { ...p, estado: nuevoEstadoModal } : p));
-      cerrarEditarEstado();
-    } catch (err) {
-      console.error('Error al actualizar estado:', err);
-      alert('Error al actualizar estado');
-    }
+  const handleStatusChange = (pedidoId: number, nuevoEstado: string) => {
+    setPedidos(prev =>
+      prev.map(p =>
+        p.id_pedido === pedidoId ? { ...p, estado: nuevoEstado } : p
+      )
+    );
   };
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <h1 className="page-title">Mis Pedidos</h1>
-      {error && <div className="error">{error}</div>}
+      <div style={{ background: '#fafad2', padding: '32px 0 16px 0', marginBottom: 24, borderRadius: 16, textAlign: 'center' }}>
+        <h1 style={{ color: '#054d25', fontWeight: 700, fontSize: 40, margin: 0 }}>Pedidos</h1>
+      </div>
+
+      {error && (
+        <div style={{
+          background: '#f8d7da',
+          border: '1px solid #f5c6cb',
+          color: '#721c24',
+          padding: '12px 16px',
+          borderRadius: '6px',
+          marginBottom: '16px'
+        }}>
+          {error}
+        </div>
+      )}
+
       {loading ? (
-        <div>Cargando pedidos...</div>
+        <div style={{ textAlign: 'center', padding: '40px' }}>
+          <div style={{ fontSize: '24px', marginBottom: '12px' }}>⏳ Cargando pedidos...</div>
+        </div>
+      ) : pedidos.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px', background: '#f5f5f5', borderRadius: '8px' }}>
+          <div style={{ fontSize: '18px', color: '#666' }}>📦 No tienes pedidos yet</div>
+        </div>
       ) : (
-        <div className="table-container">
-          <table className="custom-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Fecha</th>
-                <th>Estado</th>
-                <th>Total</th>
-                {userId === "1" && <th>Cliente ID</th>}
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pedidos.map((pedido) => (
-                <tr key={pedido.id_pedido}>
-                  <td>{pedido.id_pedido}</td>
-                  <td>{pedido.fecha_pedido}</td>
-                  <td>
-                    <span className={`status ${pedido.estado.toLowerCase()}`}>
-                      {pedido.estado}
-                    </span>
-                  </td>
-                  <td>${pedido.total.toFixed(2)}</td>
-                  {userId === "1" && <td>{pedido.cliente_id}</td>}
-                  <td>
-                    <div className="table-actions">
-                      {userId === "1" && (
-                        <>
-                          <button className="btn-delete" onClick={() => handleDelete(pedido.id_pedido)}>
-                            Eliminar
-                          </button>
-                          <button className="btn-edit" onClick={() => abrirEditarEstado(pedido)}>
-                            Editar estado
-                          </button>
-                        </>
-                      )}
-                      <button
-                        className="btn-add"
-                        onClick={() => setSelectedPedidoId(pedido.id_pedido)}
-                      >
-                        Ver detalle
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {editingPedido && (
-        <div className="modal-overlay">
-          <motion.div className="modal" initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
-            <h2>Editar estado del pedido #{editingPedido.id_pedido}</h2>
-            <label>Estado</label>
-            <select value={nuevoEstadoModal} onChange={e => setNuevoEstadoModal(e.target.value)}>
-              <option value="Procesando">Procesando</option>
-              <option value="En camino">En camino</option>
-              <option value="Entregado">Entregado</option>
-              <option value="Cancelado">Cancelado</option>
-            </select>
-            <div className="modal-buttons" style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
-              <button className="btn-save" onClick={guardarEstado}>Guardar</button>
-              <button className="btn-delete" onClick={cerrarEditarEstado}>Cancelar</button>
+        <div className="panel-card">
+          {/* Sección de Filtros */}
+          <div style={{
+            background: '#f5f5f5',
+            padding: '16px',
+            borderRadius: '8px',
+            marginBottom: '20px',
+            border: '1px solid #ddd'
+          }}>
+            <h3 style={{ margin: '0 0 16px 0', color: '#054d25', fontSize: '16px' }}>Filtros</h3>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+              gap: '16px',
+              marginBottom: '16px'
+            }}>
+              {/* Filtro por Estado */}
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                  Estado
+                </label>
+                <input
+                  type="text"
+                  placeholder="Buscar por estado..."
+                  value={filterEstado}
+                  onChange={(e) => setFilterEstado(e.target.value)}
+                  className="form-input"
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              {/* Filtro por Cliente ID (solo para vendedores) */}
+              {isVendedor && (
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                    Cliente ID
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="Buscar por ID de cliente..."
+                    value={filterClienteId}
+                    onChange={(e) => setFilterClienteId(e.target.value === "" ? "" : Number(e.target.value))}
+                    className="form-input"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              )}
+
+              {/* Filtro por Fecha Desde */}
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                  Fecha Desde
+                </label>
+                <input
+                  type="date"
+                  value={filterFechaDesde}
+                  onChange={(e) => setFilterFechaDesde(e.target.value)}
+                  className="form-input"
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              {/* Filtro por Fecha Hasta */}
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                  Fecha Hasta
+                </label>
+                <input
+                  type="date"
+                  value={filterFechaHasta}
+                  onChange={(e) => setFilterFechaHasta(e.target.value)}
+                  className="form-input"
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              {/* Filtro por Total Mínimo */}
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                  Total Mínimo
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Mínimo..."
+                  value={filterTotalMin}
+                  onChange={(e) => setFilterTotalMin(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="form-input"
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              {/* Filtro por Total Máximo */}
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                  Total Máximo
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Máximo..."
+                  value={filterTotalMax}
+                  onChange={(e) => setFilterTotalMax(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="form-input"
+                  style={{ width: '100%' }}
+                />
+              </div>
             </div>
-          </motion.div>
+
+            <button
+              onClick={clearFilters}
+              className="btn-delete"
+              style={{ padding: '8px 16px', fontSize: '14px' }}
+            >
+              Limpiar filtros
+            </button>
+
+            <p style={{ margin: '12px 0 0 0', color: '#666', fontSize: '14px' }}>
+              Mostrando {filteredPedidos.length} de {pedidos.length} pedidos
+            </p>
+          </div>
+
+          <div className="panel-scroll">
+            {filteredPedidos.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
+                No hay pedidos que coincidan con los filtros
+              </div>
+            ) : (
+              <>
+          {filteredPedidos.map((pedido) => (
+            <motion.div
+              key={pedido.id_pedido}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`pedido-card ${pedido.estado.toLowerCase().replace(' ', '-')}`}
+              style={{ marginBottom: '20px' }}
+            >
+              <PedidoTimeline
+                pedidoId={pedido.id_pedido}
+                estado={pedido.estado}
+                fechaPedido={pedido.fecha_pedido}
+                total={pedido.total}
+                onStatusChange={(nuevoEstado) =>
+                  handleStatusChange(pedido.id_pedido, nuevoEstado)
+                }
+                canEditStatus={isVendedor}
+              />
+
+              {/* Acciones adicionales */}
+              <div style={{
+                display: 'flex',
+                gap: '12px',
+                marginTop: '16px',
+                paddingTop: '16px',
+                borderTop: '1px solid #ddd',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap'
+              }}>
+                <button
+                  className="action-button btn-status-quick"
+                  onClick={() => setSelectedPedidoId(pedido.id_pedido)}
+                  style={{
+                    background: '#3498db',
+                    color: 'white',
+                    padding: '10px 16px',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: '600'
+                  }}
+                >
+                  👁️ Ver Detalles
+                </button>
+
+                {isVendedor && (
+                  <button
+                    className="action-button btn-delete"
+                    onClick={() => handleDelete(pedido.id_pedido)}
+                    style={{
+                      background: '#e74c3c',
+                      color: 'white',
+                      padding: '10px 16px',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontWeight: '600'
+                    }}
+                  >
+                    🗑️ Eliminar
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          ))}
+              </>
+            )}
+          </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={deleteConfirm !== null}
+        title="Eliminar pedido"
+        message="¿Seguro que deseas eliminar este pedido? Esta acción no se puede deshacer."
+        confirmText="Eliminar"
+        cancelText="Cancelar"
+        isDangerous={true}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </motion.div>
   );
 }

@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import ModalResena from "./ModalResena";
+import { useToast } from "../../contexts/useToastContext";
+import ConfirmModal from "../ConfirmModal";
 
 interface Resena {
   id: number;
@@ -19,14 +21,23 @@ interface Props {
 
 const ResenasPanel: React.FC<Props> = ({ esVendedor, vendedorId, productoId, onResenaEnviada }) => {
   const [resenas, setResenas] = useState<Resena[]>([]);
+  const [filteredResenas, setFilteredResenas] = useState<Resena[]>([]);
   const [respuesta, setRespuesta] = useState("");
-  const [editandoId, setEditandoId] = useState<number | null>(null);
   const [editandoResena, setEditandoResena] = useState<Resena | null>(null);
   const [selectedRespuestaResena, setSelectedRespuestaResena] = useState<Resena | null>(null);
   const [error, setError] = useState("");
   const [puedeResenar, setPuedeResenar] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [modalModoEdicion, setModalModoEdicion] = useState(false);
+  const [deleteConfirmRespuesta, setDeleteConfirmRespuesta] = useState<number | null>(null);
+  const [deleteConfirmResena, setDeleteConfirmResena] = useState<number | null>(null);
+  const { showToast } = useToast();
+
+  // Estados para los filtros
+  const [filterCalificacion, setFilterCalificacion] = useState<number | "">("");
+  const [filterClienteId, setFilterClienteId] = useState<number | "">("");
+  const [filterProductoId, setFilterProductoId] = useState<number | "">("");
+  const [filterTieneRespuesta, setFilterTieneRespuesta] = useState<boolean | "">("");
 
   const userId = Number(localStorage.getItem("userId"));
 
@@ -35,13 +46,59 @@ const ResenasPanel: React.FC<Props> = ({ esVendedor, vendedorId, productoId, onR
     if (esVendedor && vendedorId) {
       fetch(`/api/resenas/vendedor/${vendedorId}`)
         .then(res => res.json())
-        .then(data => setResenas(data));
+        .then(data => {
+          setResenas(data);
+          setFilteredResenas(data);
+        });
     } else if (!esVendedor && productoId) {
       fetch(`/api/resenas/producto/${productoId}`)
         .then(res => res.json())
-        .then(data => setResenas(data));
+        .then(data => {
+          setResenas(data);
+          setFilteredResenas(data);
+        });
     }
   }, [esVendedor, vendedorId, productoId, showModal, modalModoEdicion]);
+
+  // Aplicar filtros
+  const applyFilters = useCallback(() => {
+    let filtered = resenas;
+
+    if (filterCalificacion !== "") {
+      filtered = filtered.filter(r => r.calificacion === filterCalificacion);
+    }
+
+    if (filterClienteId !== "") {
+      filtered = filtered.filter(r => r.cliente_id === filterClienteId);
+    }
+
+    if (filterProductoId !== "") {
+      filtered = filtered.filter(r => r.producto_id === filterProductoId);
+    }
+
+    if (filterTieneRespuesta !== "") {
+      const tieneRespuesta = filterTieneRespuesta === true;
+      if (tieneRespuesta) {
+        filtered = filtered.filter(r => r.respuesta_vendedor && r.respuesta_vendedor.trim() !== "");
+      } else {
+        filtered = filtered.filter(r => !r.respuesta_vendedor || r.respuesta_vendedor.trim() === "");
+      }
+    }
+
+    setFilteredResenas(filtered);
+  }, [resenas, filterCalificacion, filterClienteId, filterProductoId, filterTieneRespuesta]);
+
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
+
+  // Limpiar filtros
+  const clearFilters = () => {
+    setFilterCalificacion("");
+    setFilterClienteId("");
+    setFilterProductoId("");
+    setFilterTieneRespuesta("");
+  };
 
   // Solo para cliente: verificar si puede dejar reseña
   useEffect(() => {
@@ -66,7 +123,7 @@ const ResenasPanel: React.FC<Props> = ({ esVendedor, vendedorId, productoId, onR
         return;
       }
       setRespuesta("");
-      setEditandoId(null);
+      setSelectedRespuestaResena(null);
       if (esVendedor && vendedorId) {
         fetch(`/api/resenas/vendedor/${vendedorId}`)
           .then(res => res.json())
@@ -78,23 +135,29 @@ const ResenasPanel: React.FC<Props> = ({ esVendedor, vendedorId, productoId, onR
   };
 
   const handleEliminarRespuesta = async (resenaId: number) => {
-    if (!window.confirm("¿Seguro que deseas eliminar la respuesta?")) return;
+    setDeleteConfirmRespuesta(resenaId);
+  };
+
+  const confirmDeleteRespuesta = async () => {
+    if (deleteConfirmRespuesta === null) return;
     try {
-      const res = await fetch(`/api/resenas/${resenaId}/respuesta`, {
+      const res = await fetch(`/api/resenas/${deleteConfirmRespuesta}/respuesta`, {
         method: "DELETE",
       });
       if (!res.ok) {
-        setError("Error al eliminar respuesta.");
+        showToast("Error al eliminar respuesta.", "error");
         return;
       }
+      showToast("Respuesta eliminada correctamente", "success");
       if (esVendedor && vendedorId) {
         fetch(`/api/resenas/vendedor/${vendedorId}`)
           .then(res => res.json())
           .then(data => setResenas(data));
       }
     } catch {
-      setError("Error de red.");
+      showToast("Error de red.", "error");
     }
+    setDeleteConfirmRespuesta(null);
   };
 
   // Cliente edita su reseña
@@ -106,15 +169,20 @@ const ResenasPanel: React.FC<Props> = ({ esVendedor, vendedorId, productoId, onR
 
   // Cliente elimina su reseña
   const handleEliminarResena = async (resenaId: number) => {
-    if (!window.confirm("¿Seguro que deseas eliminar tu reseña?")) return;
+    setDeleteConfirmResena(resenaId);
+  };
+
+  const confirmDeleteResena = async () => {
+    if (deleteConfirmResena === null) return;
     try {
-      const res = await fetch(`/api/resenas/${resenaId}`, {
+      const res = await fetch(`/api/resenas/${deleteConfirmResena}`, {
         method: "DELETE",
       });
       if (!res.ok) {
-        setError("Error al eliminar reseña.");
+        showToast("Error al eliminar reseña.", "error");
         return;
       }
+      showToast("Reseña eliminada correctamente", "success");
       if (productoId) {
         fetch(`/api/resenas/producto/${productoId}`)
           .then(res => res.json())
@@ -122,8 +190,9 @@ const ResenasPanel: React.FC<Props> = ({ esVendedor, vendedorId, productoId, onR
         setPuedeResenar(true);
       }
     } catch {
-      setError("Error de red.");
+      showToast("Error de red.", "error");
     }
+    setDeleteConfirmResena(null);
   };
 
   // Cuando el cliente envía una reseña, recarga la lista
@@ -143,11 +212,129 @@ const ResenasPanel: React.FC<Props> = ({ esVendedor, vendedorId, productoId, onR
   return (
     <div>
       <div className="panel-card">
+        {/* Sección de Filtros */}
+        <div style={{
+          background: '#f5f5f5',
+          padding: '16px',
+          borderRadius: '8px',
+          marginBottom: '20px',
+          border: '1px solid #ddd'
+        }}>
+          <h3 style={{ margin: '0 0 16px 0', color: '#054d25', fontSize: '16px' }}>Filtros</h3>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+            gap: '16px',
+            marginBottom: '16px'
+          }}>
+            {/* Filtro por Calificación */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                Calificación
+              </label>
+              <select
+                value={filterCalificacion}
+                onChange={(e) => setFilterCalificacion(e.target.value === "" ? "" : Number(e.target.value))}
+                className="form-input"
+                style={{ width: '100%' }}
+              >
+                <option value="">Todas</option>
+                <option value="1">⭐ 1 estrella</option>
+                <option value="2">⭐⭐ 2 estrellas</option>
+                <option value="3">⭐⭐⭐ 3 estrellas</option>
+                <option value="4">⭐⭐⭐⭐ 4 estrellas</option>
+                <option value="5">⭐⭐⭐⭐⭐ 5 estrellas</option>
+              </select>
+            </div>
+
+            {/* Filtro por Cliente ID */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                Cliente ID
+              </label>
+              <input
+                type="number"
+                placeholder="Buscar por ID de cliente..."
+                value={filterClienteId}
+                onChange={(e) => setFilterClienteId(e.target.value === "" ? "" : Number(e.target.value))}
+                className="form-input"
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            {/* Filtro por Producto ID */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+                Producto ID
+              </label>
+              <input
+                type="number"
+                placeholder="Buscar por ID de producto..."
+                value={filterProductoId}
+                onChange={(e) => setFilterProductoId(e.target.value === "" ? "" : Number(e.target.value))}
+                className="form-input"
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            {/* Filtro por Respuesta */}
+            {esVendedor && (
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#333' }}>
+                  Estado de Respuesta
+                </label>
+                <div style={{ display: 'flex', gap: '12px', flexDirection: 'column' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="respuesta"
+                      checked={filterTieneRespuesta === ""}
+                      onChange={() => setFilterTieneRespuesta("")}
+                    />
+                    <span>Todas</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="respuesta"
+                      checked={filterTieneRespuesta === true}
+                      onChange={() => setFilterTieneRespuesta(true)}
+                    />
+                    <span>Con respuesta</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="respuesta"
+                      checked={filterTieneRespuesta === false}
+                      onChange={() => setFilterTieneRespuesta(false)}
+                    />
+                    <span>Sin respuesta</span>
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={clearFilters}
+            className="btn-delete"
+            style={{ padding: '8px 16px', fontSize: '14px' }}
+          >
+            Limpiar filtros
+          </button>
+
+          <p style={{ margin: '12px 0 0 0', color: '#666', fontSize: '14px' }}>
+            Mostrando {filteredResenas.length} de {resenas.length} reseñas
+          </p>
+        </div>
+
         <div className="table-container">
           <div style={{ padding: 12 }}>
-            {resenas.length === 0 && <p>No hay reseñas aún.</p>}
+            {filteredResenas.length === 0 && <p>No hay reseñas que coincidan con los filtros.</p>}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
-              {resenas.map(resena => (
+              {filteredResenas.map(resena => (
                 <div key={resena.id} style={{ background: '#fff', borderRadius: 12, boxShadow: '0 6px 18px rgba(0,0,0,0.06)', padding: '16px', position: 'relative', borderLeft: '6px solid #006633' }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
@@ -221,7 +408,6 @@ const ResenasPanel: React.FC<Props> = ({ esVendedor, vendedorId, productoId, onR
                       onMouseOut={e => (e.currentTarget.style.background = "#e0e0e0")}
                       onClick={() => {
                         // Abrir modal para editar la respuesta
-                        setEditandoId(resena.id);
                         setSelectedRespuestaResena(resena);
                         setRespuesta(resena.respuesta_vendedor || "");
                       }}
@@ -265,7 +451,6 @@ const ResenasPanel: React.FC<Props> = ({ esVendedor, vendedorId, productoId, onR
                   onMouseOver={e => (e.currentTarget.style.background = "#004d2c")}
                   onMouseOut={e => (e.currentTarget.style.background = "#006633")}
                   onClick={() => {
-                    setEditandoId(resena.id);
                     setSelectedRespuestaResena(resena);
                     setRespuesta("");
                   }}
@@ -324,7 +509,7 @@ const ResenasPanel: React.FC<Props> = ({ esVendedor, vendedorId, productoId, onR
                       }}
                     />
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                      <button type="button" onClick={() => { setEditandoId(null); setSelectedRespuestaResena(null); setRespuesta(''); }} style={{ background: '#e0e0e0', border: 'none', borderRadius: 8, padding: '10px 18px', cursor: 'pointer' }}>Cancelar</button>
+                      <button type="button" onClick={() => { setSelectedRespuestaResena(null); setRespuesta(''); }} style={{ background: '#e0e0e0', border: 'none', borderRadius: 8, padding: '10px 18px', cursor: 'pointer' }}>Cancelar</button>
                       <button type="submit" style={{ background: '#27ae60', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 18px', cursor: 'pointer' }}>Guardar</button>
                     </div>
                   </form>
@@ -392,6 +577,26 @@ const ResenasPanel: React.FC<Props> = ({ esVendedor, vendedorId, productoId, onR
           }
         />
       )}
+      <ConfirmModal
+        isOpen={deleteConfirmRespuesta !== null}
+        title="Eliminar respuesta"
+        message="¿Seguro que deseas eliminar esta respuesta? Esta acción no se puede deshacer."
+        confirmText="Eliminar"
+        cancelText="Cancelar"
+        isDangerous={true}
+        onConfirm={confirmDeleteRespuesta}
+        onCancel={() => setDeleteConfirmRespuesta(null)}
+      />
+      <ConfirmModal
+        isOpen={deleteConfirmResena !== null}
+        title="Eliminar reseña"
+        message="¿Seguro que deseas eliminar tu reseña? Esta acción no se puede deshacer."
+        confirmText="Eliminar"
+        cancelText="Cancelar"
+        isDangerous={true}
+        onConfirm={confirmDeleteResena}
+        onCancel={() => setDeleteConfirmResena(null)}
+      />
       </div>
     </div>
   );

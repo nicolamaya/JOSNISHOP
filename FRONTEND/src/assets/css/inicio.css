@@ -534,6 +534,19 @@ header {
   display: block;
 }
 
+.nombre-producto {
+  font-size: 1.15em;
+  color: #1b3a2b;
+  font-weight: 700;
+  margin: 12px 0 8px 0;
+  line-height: 1.4;
+  font-family: "Montserrat", Arial, sans-serif;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .product-img-placeholder {
   width: 170px;
   height: 170px;
@@ -545,7 +558,7 @@ header {
 }
 
 .precio {
-  color: #fb2e01;
+  color: #ff0000;
   font-weight: 700;
   font-size: 2em;
   margin-bottom: 8px;

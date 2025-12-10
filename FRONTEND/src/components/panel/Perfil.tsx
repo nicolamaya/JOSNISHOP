@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 // Iconos de lucide-react
-import { CheckCircle, XCircle, Edit2, Save, X, Eye, EyeOff } from "lucide-react"; // <-- agrega Eye y EyeOff
+import { Edit2, Save, X, Eye, EyeOff, XCircle } from "lucide-react";
 import '../../assets/css/Perfil.css';
+import { useToast } from "../../contexts/useToastContext";
+import ConfirmModal from "../ConfirmModal";
 
 // Interfaz que representa el usuario que devuelve el backend
 interface Usuario {
@@ -13,6 +15,12 @@ interface Usuario {
     id_rol: number;
     nombre: string;
   };
+  foto_perfil?: Array<{
+    id: number;
+    url: string;
+    fecha_subida: string;
+    tipo: string;
+  }>;
 }
 
 const Perfil: React.FC = () => {
@@ -24,10 +32,17 @@ const Perfil: React.FC = () => {
   const [editMode, setEditMode] = useState(false);
   // Estado del formulario para actualizar datos
   const [form, setForm] = useState({ nombre: "", correo: "", contraseña: "" });
-  // Estado para alertas (éxito o error)
-  const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   // Estado para mostrar/ocultar contraseña
   const [showPassword, setShowPassword] = useState(false);
+  // Toast
+  const { showToast } = useToast();
+  // Confirmación
+  const [deactivateStep, setDeactivateStep] = useState<0 | 1 | 2>(0);
+  // Estados para foto de perfil
+  const [profileImageFile, setProfileImageFile] = useState<File | null>(null);
+  const [profileImagePreview, setProfileImagePreview] = useState<string | null>(null);
+  const [fotoPerfilUrl, setFotoPerfilUrl] = useState<string | null>(null);
+  const [uploadingProfile, setUploadingProfile] = useState(false);
 
   // useEffect que carga los datos del usuario al montar el componente
   useEffect(() => {
@@ -58,9 +73,107 @@ const Perfil: React.FC = () => {
       });
   }, []);
 
+  // useEffect para cargar la foto de perfil desde el backend
+  useEffect(() => {
+    if (!user) return;
+    const userId = localStorage.getItem("userId");
+    if (!userId) return;
+
+    axios
+      .get<Usuario>(`http://localhost:8000/usuarios/${userId}`)
+      .then((res) => {
+        // Buscar si hay una foto de perfil en los videos
+        if (res.data.foto_perfil && res.data.foto_perfil.length > 0) {
+          const foto = res.data.foto_perfil[res.data.foto_perfil.length - 1];
+          setFotoPerfilUrl(foto.url);
+        }
+      })
+      .catch((err) => {
+        console.error("Error al cargar foto de perfil:", err);
+      });
+  }, [user]);
+
   // Maneja cambios en los inputs del formulario
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  // Maneja la selección de imagen de perfil
+  const handleProfileImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validar que sea imagen
+    if (!file.type.startsWith('image/')) {
+      showToast('Por favor selecciona una imagen válida', 'error');
+      return;
+    }
+
+    // Validar tamaño (máximo 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('La imagen no puede superar 5MB', 'error');
+      return;
+    }
+
+    setProfileImageFile(file);
+
+    // Crear preview
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setProfileImagePreview(event.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Sube la imagen de perfil al servidor
+  const handleUploadProfileImage = async () => {
+    if (!profileImageFile || !user) {
+      showToast('Por favor selecciona una imagen', 'error');
+      return;
+    }
+
+    setUploadingProfile(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', profileImageFile);
+
+      const response = await axios.post<{ success: boolean; message: string; url: string }>(
+        `http://localhost:8000/usuarios/${user.id_usuario}/upload-perfil`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+
+      // Normalize to absolute URL (backend serves at http://localhost:8000)
+      const rawUrl = response.data.url || '';
+      const fullUrl = rawUrl.startsWith('http') ? rawUrl : `http://localhost:8000${rawUrl}`;
+      setFotoPerfilUrl(fullUrl);
+      // persist avatar URL so other parts of the app can use it
+      try {
+        localStorage.setItem('userAvatar', fullUrl);
+      } catch (e) {
+        // ignore
+      }
+      // notify other components (Panel) that avatar changed
+      try {
+        window.dispatchEvent(new CustomEvent('avatarChanged', { detail: { url: fullUrl } }));
+      } catch (e) {
+        // ignore
+      }
+      setProfileImageFile(null);
+      setProfileImagePreview(null);
+      showToast('✅ Foto de perfil actualizada correctamente', 'success');
+    } catch (err) {
+      console.error('Error al subir foto de perfil:', err);
+      showToast('Error al subir la foto de perfil', 'error');
+    } finally {
+      setUploadingProfile(false);
+    }
+  };
+
+  // Cancela la subida de imagen
+  const handleCancelProfileImage = () => {
+    setProfileImageFile(null);
+    setProfileImagePreview(null);
   };
 
   // Maneja la actualización del perfil
@@ -72,7 +185,7 @@ const Perfil: React.FC = () => {
       return re.test(pwd);
     };
     if (form.contraseña && !validatePassword(form.contraseña)) {
-      setAlert({ type: 'error', message: 'La contraseña debe tener al menos 8 caracteres, una mayúscula, un número y un símbolo.' });
+      showToast('La contraseña debe tener al menos 8 caracteres, una mayúscula, un número y un símbolo.', 'error');
       return;
     }
     try {
@@ -82,40 +195,40 @@ const Perfil: React.FC = () => {
       // Salimos de modo edición
       setEditMode(false);
       // Mostramos alerta de éxito
-      setAlert({ type: 'success', message: 'Perfil actualizado correctamente.' });
+      showToast('Perfil actualizado correctamente.', 'success');
 
       // Refrescamos los datos del usuario para mostrar lo más nuevo
       const res = await axios.get<Usuario>(`http://localhost:8000/usuarios/${user?.id_usuario}`);
       setUser(res.data);
     } catch {
       // Mostramos alerta de error si falla la actualización
-      setAlert({ type: 'error', message: 'Error al actualizar usuario.' });
+      showToast('Error al actualizar usuario.', 'error');
     }
   };
 
   // Maneja la desactivación de la cuenta
   const handleDeactivateAccount = async () => {
     if (!user) return;
-    const first = window.confirm(
-      "¿Estás seguro de que deseas desactivar tu cuenta? No podrás iniciar sesión hasta reactivarla."
-    );
-    if (!first) return;
-    const second = window.confirm(
-      "¡Atención!\n\nDesactivar tu cuenta la dejará inactiva, pero tus datos y pedidos se conservarán. ¿Realmente deseas continuar?"
-    );
-    if (!second) return;
+    setDeactivateStep(1);
+  };
+
+  const confirmDeactivate = async () => {
+    if (!user) return;
+    setDeactivateStep(2);
+  };
+
+  const finalizeDeactivate = async () => {
+    if (!user) return;
     try {
       await axios.put(`http://localhost:8000/usuarios/${user.id_usuario}/desactivar`);
       localStorage.clear();
-      setAlert({
-        type: 'success',
-        message: 'Cuenta desactivada correctamente. ¡Esperamos verte pronto de vuelta!',
-      });
+      showToast('Cuenta desactivada correctamente. ¡Esperamos verte pronto de vuelta!', 'success');
       setTimeout(() => {
         window.location.href = "/login";
       }, 2000);
     } catch {
-      setAlert({ type: 'error', message: 'Error al desactivar la cuenta.' });
+      showToast('Error al desactivar la cuenta.', 'error');
+      setDeactivateStep(0);
     }
   };
 
@@ -145,32 +258,117 @@ const Perfil: React.FC = () => {
             Gestiona y personaliza tu información de usuario
           </p>
 
-          {/* Alertas */}
-          {alert && (
-            <div className={`perfil-alert perfil-alert-${alert.type}`}> 
-              {alert.type === 'success' ? <CheckCircle size={20} /> : <XCircle size={20} />}
-              <span>{alert.message}</span>
-              <button className="perfil-alert-close" onClick={() => setAlert(null)}>
-                <X size={16} />
-              </button>
-            </div>
-          )}
-
           {/* Modo vista */}
           {!editMode ? (
             <div className="perfil-info" style={{alignItems:'center'}}>
-              {/* Avatar con inicial */}
-              <div className="perfil-avatar perfil-avatar-xl">
-                {user.nombre && (
-                  <span>
-                    {user.nombre
-                      .split(" ")
-                      .map(n => n[0])
-                      .join("")
-                      .toUpperCase()}
-                  </span>
-                )}
+              {/* Avatar con foto de perfil o iniciales */}
+              <div style={{ position: 'relative', marginBottom: '16px' }}>
+                <div className="perfil-avatar perfil-avatar-xl" style={{
+                  backgroundImage: fotoPerfilUrl ? `url(${fotoPerfilUrl})` : 'none',
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                  display: fotoPerfilUrl ? 'block' : 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  {!fotoPerfilUrl && user.nombre && (
+                    <span>
+                      {user.nombre
+                        .split(" ")
+                        .map(n => n[0])
+                        .join("")
+                        .toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                {/* Botón para cambiar foto (ícono de cámara) */}
+                <label style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  right: 0,
+                  width: '40px',
+                  height: '40px',
+                  background: '#27ae60',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  border: '3px solid white',
+                  transition: 'background 0.2s'
+                }}
+                  onMouseOver={(e) => (e.currentTarget.style.background = '#219150')}
+                  onMouseOut={(e) => (e.currentTarget.style.background = '#27ae60')}
+                  title="Cambiar foto de perfil"
+                >
+                  <span style={{ fontSize: '20px' }}>📷</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleProfileImageChange}
+                    style={{ display: 'none' }}
+                  />
+                </label>
               </div>
+
+              {/* Preview y controles de foto si se seleccionó una */}
+              {profileImagePreview && (
+                <div style={{
+                  marginBottom: '16px',
+                  padding: '12px',
+                  background: '#f9f9f9',
+                  borderRadius: '8px',
+                  textAlign: 'center',
+                  borderLeft: '4px solid #27ae60'
+                }}>
+                  <p style={{ margin: '0 0 12px 0', fontWeight: 'bold', fontSize: '14px' }}>
+                    Preview de nueva foto:
+                  </p>
+                  <img src={profileImagePreview} alt="Preview" style={{
+                    maxWidth: '150px',
+                    maxHeight: '150px',
+                    borderRadius: '8px',
+                    marginBottom: '12px'
+                  }} />
+                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={handleUploadProfileImage}
+                      disabled={uploadingProfile}
+                      style={{
+                        background: '#27ae60',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '8px 16px',
+                        fontWeight: 'bold',
+                        cursor: uploadingProfile ? 'not-allowed' : 'pointer',
+                        opacity: uploadingProfile ? 0.6 : 1
+                      }}
+                    >
+                      {uploadingProfile ? '⏳ Subiendo...' : '✅ Guardar'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelProfileImage}
+                      disabled={uploadingProfile}
+                      style={{
+                        background: '#e0e0e0',
+                        color: '#333',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '8px 16px',
+                        fontWeight: 'bold',
+                        cursor: uploadingProfile ? 'not-allowed' : 'pointer',
+                        opacity: uploadingProfile ? 0.6 : 1
+                      }}
+                    >
+                      ❌ Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Datos */}
               <div className="perfil-datos perfil-datos-center">
                 <p><span className="perfil-label">Nombre:</span> {user.nombre}</p>
@@ -237,6 +435,26 @@ const Perfil: React.FC = () => {
           </div>
         </div>
       )}
+      <ConfirmModal
+        isOpen={deactivateStep === 1}
+        title="Desactivar tu cuenta"
+        message="¿Estás seguro de que deseas desactivar tu cuenta? No podrás iniciar sesión hasta reactivarla."
+        confirmText="Sí, continuar"
+        cancelText="Cancelar"
+        isDangerous={true}
+        onConfirm={confirmDeactivate}
+        onCancel={() => setDeactivateStep(0)}
+      />
+      <ConfirmModal
+        isOpen={deactivateStep === 2}
+        title="Confirmar desactivación"
+        message="¡Atención! Desactivar tu cuenta la dejará inactiva, pero tus datos y pedidos se conservarán. ¿Realmente deseas continuar?"
+        confirmText="Desactivar cuenta"
+        cancelText="Cancelar"
+        isDangerous={true}
+        onConfirm={finalizeDeactivate}
+        onCancel={() => setDeactivateStep(0)}
+      />
     </div>
   );
 };

@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import { useToast } from "../../contexts/useToastContext";
 
-const TERMS_TEXT = `Términos y Condiciones de Uso de Josnishop
+const DEFAULT_TERMS_TEXT = `Términos y Condiciones de Uso de Josnishop
 Fecha de última actualización: 31 de octubre de 2025
 
 1. Aceptación de los Términos
@@ -42,6 +43,57 @@ Josnishop se reserva el derecho de modificar estos Términos y Condiciones en cu
 `;
 
 const Terminos: React.FC = () => {
+  const [termsText, setTermsText] = useState(DEFAULT_TERMS_TEXT);
+  const [editingTerms, setEditingTerms] = useState(false);
+  const [editedText, setEditedText] = useState(DEFAULT_TERMS_TEXT);
+  const [showConfirmRestore, setShowConfirmRestore] = useState(false);
+  const { showToast } = useToast();
+
+  // Cargar términos guardados al montar el componente
+  useEffect(() => {
+    const savedTerms = localStorage.getItem('termsText');
+    if (savedTerms) {
+      setTermsText(savedTerms);
+      setEditedText(savedTerms);
+    }
+  }, []);
+
+  const handleEditClick = () => {
+    setEditedText(termsText);
+    setEditingTerms(true);
+  };
+
+  const handleSaveTerms = () => {
+    if (!editedText.trim()) {
+      showToast('Los términos no pueden estar vacíos', 'error');
+      return;
+    }
+    localStorage.setItem('termsText', editedText);
+    setTermsText(editedText);
+    setEditingTerms(false);
+    showToast('Términos y Condiciones guardados correctamente', 'success');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingTerms(false);
+    setEditedText(termsText);
+  };
+
+  const handleRestoreDefault = () => {
+    setShowConfirmRestore(true);
+  };
+
+  const confirmRestore = () => {
+    setTermsText(DEFAULT_TERMS_TEXT);
+    setEditedText(DEFAULT_TERMS_TEXT);
+    localStorage.setItem('termsText', DEFAULT_TERMS_TEXT);
+    setShowConfirmRestore(false);
+    showToast('✅ Términos restaurados a los valores por defecto', 'success');
+  };
+
+  const cancelRestore = () => {
+    setShowConfirmRestore(false);
+  };
   const downloadPdf = () => {
     const doc = new jsPDF({ unit: 'pt', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -68,12 +120,12 @@ const Terminos: React.FC = () => {
       doc.text('Términos y Condiciones de Uso de Josnishop', margin, yStart);
       doc.setFontSize(10);
       doc.setTextColor(120);
-      doc.text('Fecha de última actualización: 31 de octubre de 2025', margin, yStart + 18);
+      doc.text('Fecha de última actualización: ' + new Date().toLocaleDateString(), margin, yStart + 18);
 
       // body text, wrapped
       doc.setFontSize(11);
       doc.setTextColor(40);
-      const lines = doc.splitTextToSize(TERMS_TEXT, contentWidth);
+      const lines = doc.splitTextToSize(termsText, contentWidth);
       let cursorY = yStart + 36;
       const lineHeight = 14;
       for (let i = 0; i < lines.length; i++) {
@@ -92,7 +144,7 @@ const Terminos: React.FC = () => {
       // draw logo at top-left
       try {
         doc.addImage(img, 'PNG', margin, 18, 48, 48);
-      } catch (err) {
+      } catch (e) {
         // ignore image errors
       }
       drawContent(40);
@@ -117,8 +169,9 @@ const Terminos: React.FC = () => {
             <h2 style={{ margin: 0 }}>Términos y Condiciones</h2>
             <p style={{ margin: '6px 0 0 0', color: '#666' }}>Lee detenidamente los términos que regulan el uso de Josnishop.</p>
           </div>
-          <div>
+          <div style={{ display: 'flex', gap: 12 }}>
             <button className="btn-save" onClick={downloadPdf}>Descargar PDF</button>
+            <button className="btn-add" onClick={handleEditClick}>✏️ Editar Términos</button>
           </div>
         </div>
 
@@ -126,8 +179,8 @@ const Terminos: React.FC = () => {
           <div style={{ flex: '0 0 420px' }}>
             <div style={{ background: '#fff', borderRadius: 12, padding: 18, boxShadow: '0 3px 12px rgba(0,0,0,0.06)', lineHeight: 1.6, fontSize: 14 }}>
               <strong style={{ display: 'block', marginBottom: 8 }}>Términos y Condiciones de Uso de Josnishop</strong>
-              <small style={{ color: '#666' }}>Fecha de última actualización: 31 de octubre de 2025</small>
-              <div style={{ marginTop: 12, whiteSpace: 'pre-wrap' }}>{TERMS_TEXT}</div>
+              <small style={{ color: '#666' }}>Última actualización: {new Date().toLocaleDateString()}</small>
+              <div style={{ marginTop: 12, whiteSpace: 'pre-wrap' }}>{termsText}</div>
             </div>
           </div>
           <div style={{ flex: 1 }}>
@@ -144,6 +197,207 @@ const Terminos: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Modal para editar términos */}
+      {editingTerms && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1200
+        }}>
+          <div style={{
+            background: '#fff',
+            borderRadius: 14,
+            padding: '32px',
+            width: 'min(900px, 95%)',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+          }}>
+            <h2 style={{ margin: '0 0 16px 0', color: '#054d25' }}>Editar Términos y Condiciones</h2>
+            <p style={{ margin: '0 0 16px 0', color: '#666', fontSize: '14px' }}>
+              Puedes personalizar los términos y condiciones a tu gusto. Los cambios se guardarán en tu cuenta.
+            </p>
+
+            <textarea
+              value={editedText}
+              onChange={(e) => setEditedText(e.target.value)}
+              style={{
+                width: '100%',
+                minHeight: '400px',
+                padding: '12px',
+                border: '2px solid #27ae60',
+                borderRadius: '8px',
+                fontFamily: 'monospace',
+                fontSize: '14px',
+                marginBottom: '16px',
+                resize: 'vertical'
+              }}
+            />
+
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginBottom: '12px' }}>
+              <button
+                onClick={handleCancelEdit}
+                style={{
+                  background: '#e0e0e0',
+                  color: '#333',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '10px 20px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s'
+                }}
+                onMouseOver={(e) => (e.currentTarget.style.background = '#d0d0d0')}
+                onMouseOut={(e) => (e.currentTarget.style.background = '#e0e0e0')}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveTerms}
+                style={{
+                  background: '#27ae60',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '10px 20px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s'
+                }}
+                onMouseOver={(e) => (e.currentTarget.style.background = '#219150')}
+                onMouseOut={(e) => (e.currentTarget.style.background = '#27ae60')}
+              >
+                Guardar Cambios
+              </button>
+            </div>
+
+            <div style={{ 
+              background: '#f5f5f5', 
+              padding: '12px', 
+              borderRadius: '8px', 
+              textAlign: 'center',
+              marginTop: '12px'
+            }}>
+              <button
+                onClick={handleRestoreDefault}
+                style={{
+                  background: 'transparent',
+                  color: '#e74c3c',
+                  border: '1px solid #e74c3c',
+                  borderRadius: '6px',
+                  padding: '8px 16px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = '#e74c3c';
+                  e.currentTarget.style.color = '#fff';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.color = '#e74c3c';
+                }}
+              >
+                🔄 Restaurar Términos por Defecto
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmación para restaurar */}
+      {showConfirmRestore && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0,0,0,0.6)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1300
+        }}>
+          <div style={{
+            background: '#fff',
+            borderRadius: '14px',
+            padding: '32px',
+            width: 'min(500px, 95%)',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+            textAlign: 'center'
+          }}>
+            <div style={{ marginBottom: '16px', fontSize: '48px' }}>
+              ⚠️
+            </div>
+            <h2 style={{ margin: '0 0 12px 0', color: '#054d25', fontSize: '20px' }}>
+              ¿Restaurar Términos por Defecto?
+            </h2>
+            <p style={{ 
+              margin: '0 0 24px 0', 
+              color: '#666', 
+              fontSize: '14px',
+              lineHeight: '1.5'
+            }}>
+              ¿Estás seguro de que deseas restaurar los términos por defecto? Esta acción <strong>no se puede deshacer</strong> y se perderán todas tus ediciones actuales.
+            </p>
+
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button
+                onClick={cancelRestore}
+                style={{
+                  background: '#f0f0f0',
+                  color: '#333',
+                  border: '1px solid #ddd',
+                  borderRadius: '8px',
+                  padding: '10px 24px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  fontSize: '14px'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = '#e0e0e0';
+                  e.currentTarget.style.borderColor = '#999';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = '#f0f0f0';
+                  e.currentTarget.style.borderColor = '#ddd';
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmRestore}
+                style={{
+                  background: '#e74c3c',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '10px 24px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s',
+                  fontSize: '14px'
+                }}
+                onMouseOver={(e) => (e.currentTarget.style.background = '#c0392b')}
+                onMouseOut={(e) => (e.currentTarget.style.background = '#e74c3c')}
+              >
+                Sí, Restaurar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

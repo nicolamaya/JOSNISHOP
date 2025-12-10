@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import "../../assets/css/noticias.css"; // Importa tu CSS
 import "font-awesome/css/font-awesome.min.css"; // Asegúrate de tener Font Awesome
 import { FaBars } from "react-icons/fa";
@@ -6,13 +6,57 @@ import noticia1 from '../../assets/IMG/noticias1.png';
 import noticia2 from '../../assets/IMG/noticias2.png';
 import noticia3 from '../../assets/IMG/noticias3.png';
 
+type NewsItem = {
+  id: string;
+  title: string;
+  excerpt: string;
+  content: string;
+  image?: string;
+  date?: string;
+};
+
+const sampleNews: NewsItem[] = [
+  {
+    id: 'n1',
+    title: 'Función para vendedores: publica tus productos',
+    excerpt: 'Abrimos nuestra sección para que puedas vender tus propios productos.',
+    content: 'Hemos lanzado una nueva sección que permite a usuarios registrar productos para la venta. Revisa las condiciones y empieza hoy mismo.',
+    image: noticia2,
+    date: '2025-10-01'
+  },
+  {
+    id: 'n2',
+    title: 'Mejoras en la experiencia de compra',
+    excerpt: 'Actualizamos la UI y el proceso de pago para mayor rapidez.',
+    content: 'Optimizamos el flujo de compra y mejoramos la seguridad en los pagos. Disfruta de una experiencia más rápida y segura.',
+    image: noticia3,
+    date: '2025-09-15'
+  },
+  {
+    id: 'n3',
+    title: 'Nueva funcionalidad para recomendaciones',
+    excerpt: 'Sugerencias personalizadas según tu historial de búsqueda.',
+    content: 'Usamos señales de navegación para recomendar productos relevantes y mejorar la descubribilidad.',
+    image: noticia1,
+    date: '2025-08-20'
+  }
+];
+
 const Noticias: React.FC = () => {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<NewsItem | null>(null);
   const handleMenuOpen = () => setMenuOpen(true);
   const handleMenuClose = () => setMenuOpen(false);
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sampleNews;
+    return sampleNews.filter(n => (n.title + ' ' + n.excerpt + ' ' + n.content).toLowerCase().includes(q));
+  }, [query]);
+
   return (
-    <div>
+    <div className="noticias-root">
       {/* Menú superior */}
       <header>
         <div className="navbar">
@@ -163,32 +207,51 @@ const Noticias: React.FC = () => {
           {/* Lateral */}
           <aside className="noticias-lateral">
             <div className="buscador-noticia-container">
-              <i className="fa-solid fa-magnifying-glass"></i>
-              <input type="text" placeholder="Buscar noticia ..." className="buscador-noticia" />
+              <i className="fa-solid fa-magnifying-glass" aria-hidden></i>
+              <input aria-label="Buscar noticias" value={query} onChange={e => setQuery(e.target.value)} type="text" placeholder="Buscar noticia ..." className="buscador-noticia" />
             </div>
-            <div className="noticia-lateral">
-              <img src={noticia2} alt="Noticia 1" className="img-lateral" />
-              <p className="texto-lateral">
-                Abrimos nuestra sección de que puedas vender tus propios productos, mira cuales son condiciones para que puedas empezar.
-              </p>
-            </div>
-            <div className="noticia-lateral">
-              <img src={noticia3} alt="Noticia 2" className="img-lateral" />
-              <p className="texto-lateral">
-                Te ayudamos a que puedas comprar a usuarios nuevos para que puedas obtener una mejor experiencia en nuestra página
-              </p>
-            </div>
+            {sampleNews.slice(0,2).map(n => (
+              <div className="noticia-lateral" key={n.id}>
+                {n.image && <img src={n.image} alt={n.title} className="img-lateral" />}
+                <p className="texto-lateral">{n.excerpt}</p>
+              </div>
+            ))}
           </aside>
 
           {/* Principal */}
           <section className="noticia-principal">
             <h1 className="titulo-principal">Noticias</h1>
-            <img src={noticia1} alt="Noticia principal" className="img-principal" />
-            <h2 className="subtitulo-principal">
-              Se agregó una nueva función para los clientes que les ayuda a obtener productos
-            </h2>
+
+            <div className="news-list">
+              {filtered.map(n => (
+                <article className="news-card" key={n.id}>
+                  {n.image && <img src={n.image} alt={n.title} className="news-image" />}
+                  <div className="news-body">
+                    <h3 className="news-title">{n.title}</h3>
+                    <p className="news-excerpt">{n.excerpt}</p>
+                    <div className="news-meta">{n.date}</div>
+                    <div className="news-actions">
+                      <button className="button" onClick={() => setSelected(n)}>Leer más</button>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
           </section>
         </section>
+
+        {/* Modal/overlay para detalle */}
+        {selected && (
+          <div className="news-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+            <div className="news-modal-content">
+              <button className="modal-close" onClick={() => setSelected(null)} aria-label="Cerrar">×</button>
+              <h2 id="modal-title">{selected.title}</h2>
+              {selected.image && <img src={selected.image} alt="" className="modal-image" />}
+              <p className="modal-date">{selected.date}</p>
+              <div className="modal-body">{selected.content}</div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

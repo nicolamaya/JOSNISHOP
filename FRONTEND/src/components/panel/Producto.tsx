@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { motion } from "framer-motion";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import "../../assets/css/panel.css";
+import { useToast } from "../../contexts/useToastContext";
+import ConfirmModal from "../ConfirmModal";
 
 // ===================
 // Modelo Producto
@@ -27,6 +29,7 @@ interface Categoria {
 // ===================
 const Productos: React.FC = () => {
   const [productos, setProductos] = useState<Producto[]>([]);
+  const [filteredProductos, setFilteredProductos] = useState<Producto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -40,15 +43,23 @@ const Productos: React.FC = () => {
   const [categoriaId, setCategoriaId] = useState<number>(0);
   const [estado, setEstado] = useState(true);
   const [busqueda, setBusqueda] = useState<string>("");
+  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const { showToast } = useToast();
+
+  // Estados para los filtros
+  const [filterNombre, setFilterNombre] = useState("");
+  const [filterCategoriaId, setFilterCategoriaId] = useState<number | "">("");
 
   useEffect(() => {
+    const API = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
     const fetchData = async () => {
       try {
         const [prodRes, catRes] = await Promise.all([
-          axios.get<Producto[]>("http://localhost:8000/productos"),
-          axios.get<Categoria[]>("http://localhost:8000/categorias")
+          axios.get<Producto[]>(`${API}/productos`),
+          axios.get<Categoria[]>(`${API}/categorias`)
         ]);
         setProductos(prodRes.data);
+        setFilteredProductos(prodRes.data);
         setCategorias(catRes.data);
       } catch (err) {
         console.error(err);
@@ -58,6 +69,33 @@ const Productos: React.FC = () => {
     };
     fetchData();
   }, []);
+
+  // Aplicar filtros
+  const applyFilters = useCallback(() => {
+    let filtered = productos;
+
+    if (filterNombre) {
+      filtered = filtered.filter(p =>
+        p.nombre.toLowerCase().includes(filterNombre.toLowerCase())
+      );
+    }
+
+    if (filterCategoriaId !== "") {
+      filtered = filtered.filter(p => p.categoria_id === filterCategoriaId);
+    }
+
+    setFilteredProductos(filtered);
+  }, [productos, filterNombre, filterCategoriaId]);
+
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
+
+  // Limpiar filtros
+  const clearFilters = () => {
+    setFilterNombre("");
+    setFilterCategoriaId("");
+  };
 
   const abrirModal = (producto?: Producto) => {
     if (producto) {
@@ -81,7 +119,7 @@ const Productos: React.FC = () => {
     try {
       if (editProducto) {
         const res = await axios.put<Producto>(
-          `http://localhost:8000/productos/${editProducto.id}`,
+          `${API}/productos/${editProducto.id}`,
           { nombre, descripcion, categoria_id: categoriaId, estado, precio }
         );
         setProductos(
@@ -96,13 +134,13 @@ const Productos: React.FC = () => {
         if (precio !== "") form.append('precio', String(precio));
         if (imagenFile) form.append('imagen', imagenFile);
         if (videoFile) form.append('video', videoFile);
-        const resUpload = await axios.post(
-          "http://localhost:8000/upload/producto",
+        const resUpload = await axios.post<{ producto_id: number }>(
+          `${API}/upload/producto`,
           form,
           { headers: { 'Content-Type': 'multipart/form-data' } }
         );
         // Obtener el producto recien creado
-        const newProd = await axios.get<Producto>(`http://localhost:8000/productos/${resUpload.data.producto_id}`);
+        const newProd = await axios.get<Producto>(`${API}/productos/${resUpload.data.producto_id}`);
         setProductos([...productos, newProd.data]);
       }
       cerrarModal();
@@ -112,13 +150,20 @@ const Productos: React.FC = () => {
   };
 
   const eliminarProducto = async (id: number) => {
-    if (!window.confirm("¿Seguro quieres eliminar este producto?")) return;
+    setDeleteConfirm(id);
+  };
+
+  const confirmDeleteProducto = async () => {
+    if (deleteConfirm === null) return;
     try {
-      await axios.delete(`http://localhost:8000/productos/${id}`);
-      setProductos(productos.filter((p) => p.id !== id));
+      await axios.delete(`${API}/productos/${deleteConfirm}`);
+      setProductos(productos.filter((p) => p.id !== deleteConfirm));
+      showToast("Producto eliminado correctamente", "success");
     } catch (err) {
       console.error(err);
+      showToast("Error al eliminar el producto", "error");
     }
+    setDeleteConfirm(null);
   };
 
   const descargarPDF = () => {
@@ -146,12 +191,12 @@ const Productos: React.FC = () => {
       doc.text(mensajeLines, 40, 100);
 
       const startY = 120 + mensajeLines.length * 12;
-      if (productosFiltrados.length === 0) {
+      if (filteredProductos.length === 0) {
         doc.setFontSize(12);
         doc.text('No hay productos para mostrar.', 40, startY);
       } else {
         const headers = [["ID", "Nombre", "Descripción", "Categoría"]];
-        const rows = productosFiltrados.map(prod => {
+        const rows = filteredProductos.map(prod => {
           const categoria = categorias.find(c => c.id === prod.categoria_id);
           return [prod.id, prod.nombre, prod.descripcion, categoria?.nombre || "-"];
         });
@@ -181,11 +226,6 @@ const Productos: React.FC = () => {
     img.onerror = () => { render(); };
   };
 
-  // Filtrar productos por nombre
-  const productosFiltrados = productos.filter((prod) =>
-    prod.nombre.toLowerCase().includes(busqueda.toLowerCase())
-  );
-
   if (loading) return <p>Cargando productos...</p>;
 
   return (
@@ -214,11 +254,75 @@ const Productos: React.FC = () => {
             cursor: "pointer",
             transition: "background 0.2s"
           }}
-          disabled={productosFiltrados.length === 0}
+          disabled={filteredProductos.length === 0}
         >
           Descargar PDF
         </button>
       </div>
+
+      {/* Sección de Filtros */}
+      <div style={{
+        background: '#f5f5f5',
+        padding: '16px',
+        borderRadius: '8px',
+        marginBottom: '20px',
+        border: '1px solid #ddd'
+      }}>
+        <h3 style={{ margin: '0 0 16px 0', color: '#054d25', fontSize: '16px' }}>Filtros</h3>
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+          gap: '16px',
+          marginBottom: '16px'
+        }}>
+          {/* Filtro por Nombre */}
+          <div>
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+              Nombre
+            </label>
+            <input
+              type="text"
+              placeholder="Buscar por nombre..."
+              value={filterNombre}
+              onChange={(e) => setFilterNombre(e.target.value)}
+              className="form-input"
+              style={{ width: '100%' }}
+            />
+          </div>
+
+          {/* Filtro por Categoría */}
+          <div>
+            <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', color: '#333' }}>
+              Categoría
+            </label>
+            <select
+              value={filterCategoriaId}
+              onChange={(e) => setFilterCategoriaId(e.target.value === "" ? "" : Number(e.target.value))}
+              className="form-input"
+              style={{ width: '100%' }}
+            >
+              <option value="">Todas</option>
+              {categorias.map(c => (
+                <option key={c.id} value={c.id}>{c.nombre}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <button
+          onClick={clearFilters}
+          className="btn-delete"
+          style={{ padding: '8px 16px', fontSize: '14px' }}
+        >
+          Limpiar filtros
+        </button>
+
+        <p style={{ margin: '12px 0 0 0', color: '#666', fontSize: '14px' }}>
+          Mostrando {filteredProductos.length} de {productos.length} productos
+        </p>
+      </div>
+
       {/* Nuevo contenedor para el scroll vertical */}
       <div className="table-container">
         <div className="table-scroll">
@@ -233,7 +337,7 @@ const Productos: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {productosFiltrados.map((prod) => {
+              {filteredProductos.map((prod) => {
                 const categoria = categorias.find(c => c.id === prod.categoria_id);
                 return (
                   <tr key={prod.id}>
@@ -279,6 +383,16 @@ const Productos: React.FC = () => {
           </motion.div>
         </div>
       )}
+      <ConfirmModal
+        isOpen={deleteConfirm !== null}
+        title="Eliminar producto"
+        message="¿Seguro quieres eliminar este producto? Esta acción no se puede deshacer."
+        confirmText="Eliminar"
+        cancelText="Cancelar"
+        isDangerous={true}
+        onConfirm={confirmDeleteProducto}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </motion.div>
   );
 };

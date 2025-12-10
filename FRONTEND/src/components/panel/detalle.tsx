@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import "../../assets/css/pedido.css";
+import { useToast } from "../../contexts/useToastContext";
+import ConfirmModal from "../ConfirmModal";
+import generateInvoicePDF from "../../utils/generateInvoice";
 
 interface DetallePedido {
   id_detalle: number;
@@ -21,6 +24,9 @@ const Detalle: React.FC<Props> = ({ pedidoId, onBack }) => {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<DetallePedido>>({});
   const [editId, setEditId] = useState<number | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const [pedidoInfo, setPedidoInfo] = useState<any | null>(null);
+  const { showToast } = useToast();
 
   // Obtener el rol del usuario
   const userId = localStorage.getItem("userId"); // ← obtiene el id del usuario
@@ -40,6 +46,10 @@ const Detalle: React.FC<Props> = ({ pedidoId, onBack }) => {
         setError("Error al cargar detalles: " + (err?.message || ""));
         setLoading(false);
       });
+    // fetch basic pedido info (fecha, total, cliente)
+    axios.get(`http://localhost:8000/pedidos/${pedidoId}`)
+      .then(r => setPedidoInfo(r.data))
+      .catch(() => setPedidoInfo(null));
   }, [pedidoId]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -70,13 +80,19 @@ const Detalle: React.FC<Props> = ({ pedidoId, onBack }) => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm("¿Seguro que deseas eliminar este detalle?")) return;
+    setDeleteConfirm(id);
+  };
+
+  const confirmDelete = async () => {
+    if (deleteConfirm === null) return;
     try {
-      await axios.delete(`http://localhost:8000/detalles_pedido/${id}`);
-      setDetalles(detalles.filter((d) => d.id_detalle !== id));
+      await axios.delete(`http://localhost:8000/detalles_pedido/${deleteConfirm}`);
+      setDetalles(detalles.filter((d) => d.id_detalle !== deleteConfirm));
+      showToast("Detalle eliminado correctamente", "success");
     } catch {
-      setError("Error al eliminar detalle");
+      showToast("Error al eliminar detalle", "error");
     }
+    setDeleteConfirm(null);
   };
   
 
@@ -161,10 +177,60 @@ const Detalle: React.FC<Props> = ({ pedidoId, onBack }) => {
         </>
       )}
       <div className="actions-bottom">
-        <button className="btn-back" onClick={onBack}>
-          ← Volver a pedidos
-        </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-back" onClick={onBack}>
+              ← Volver a pedidos
+            </button>
+
+            <button
+              className="btn-save"
+              onClick={async () => {
+                // prepare simple structures
+                const pedido = pedidoInfo || { id_pedido: pedidoId, fecha_pedido: undefined, total: undefined, cliente: {} };
+                const detallesSimple = detalles.map(d => ({
+                  producto_id: (d as any).producto_id,
+                  descripcion: (d as any).descripcion || (d as any).nombre || (d as any).producto_nombre || (d as any).title || `Producto #${(d as any).producto_id || ''}`,
+                  cantidad: d.cantidad,
+                  precio_unitario: d.precio_unitario
+                }));
+
+                // try to fetch logo from public root and convert to base64
+                let logoBase64: string | undefined = undefined;
+                try {
+                  const resp = await fetch('/logo.png');
+                  if (resp.ok) {
+                    const blob = await resp.blob();
+                    logoBase64 = await new Promise<string>((resolve, reject) => {
+                      const reader = new FileReader();
+                      reader.onloadend = () => {
+                        const result = reader.result as string;
+                        resolve(result);
+                      };
+                      reader.onerror = reject;
+                      reader.readAsDataURL(blob);
+                    });
+                  }
+                } catch (e) {
+                  console.warn('No se pudo cargar logo para la factura:', e);
+                }
+
+                generateInvoicePDF(pedido, detallesSimple, { nombre: 'JOSNISHOP', nit: '901414566-2', direccion: 'Calle 33 #28-73', telefono: '6455858', logoBase64 });
+              }}
+            >
+              Descargar factura
+            </button>
+          </div>
       </div>
+      <ConfirmModal
+        isOpen={deleteConfirm !== null}
+        title="Eliminar detalle"
+        message="¿Seguro que deseas eliminar este detalle del pedido? Esta acción no se puede deshacer."
+        confirmText="Eliminar"
+        cancelText="Cancelar"
+        isDangerous={true}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 };

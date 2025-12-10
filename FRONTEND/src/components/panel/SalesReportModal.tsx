@@ -3,6 +3,7 @@ import axios from "axios";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import ExcelJS from 'exceljs';
+import { useToast } from "../../contexts/useToastContext";
 
 interface ReportRow {
   producto_id: number;
@@ -19,6 +20,7 @@ interface Props {
 const SalesReportModal: React.FC<Props> = ({ onClose, date }) => {
   const [rows, setRows] = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const { showToast } = useToast();
 
   useEffect(() => {
     const fetchReport = async () => {
@@ -179,7 +181,7 @@ const SalesReportModal: React.FC<Props> = ({ onClose, date }) => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Error generando Excel:', err);
-      alert('No se pudo generar el Excel. Asegúrate de haber instalado la dependencia xlsx.');
+      showToast('No se pudo generar el Excel. Asegúrate de haber instalado la dependencia xlsx.', 'error');
     }
   };
 

@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from "react";
 import "../../assets/css/producto_sele/Producto_selec.css"; // Ajusta la ruta a tu CSS
+import { useToast } from "../../contexts/useToastContext";
 
 const ProductoCafeteria: React.FC = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showVideos, setShowVideos] = useState(false);
   const innerRef = useRef<HTMLDivElement>(null);
+  const { showToast } = useToast();
 
   const items = [
     "src/assets/IMG/index/carrusel1.png",
@@ -123,8 +125,10 @@ const ProductoCafeteria: React.FC = () => {
                 // Validar si el usuario está logueado (por ejemplo, si hay un token en localStorage)
                 const token = localStorage.getItem("token");
                 if (!token) {
-                  alert("Debes iniciar sesión para agregar productos al carrito.");
-                  window.location.href = "/login";
+                  showToast("Debes iniciar sesión para agregar productos al carrito.", "warning");
+                  setTimeout(() => {
+                    window.location.href = "/login";
+                  }, 1500);
                   return;
                 }
                 type ProductoCarrito = {
