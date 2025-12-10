@@ -1,16 +1,20 @@
 # Importamos las herramientas principales de FastAPI y SQLAlchemy.
-from fastapi import APIRouter, Depends, HTTPException, Request, Body, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Body, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import random
 import string
-import smtplib
-from email.mime.text import MIMEText
+# removed direct MIMEText use; sending moved to utils.email_utils
 import bcrypt  # Librería para encriptar contraseñas.
 import threading # Para enviar correos de forma asíncrona.
 import time
 from typing import Optional, List
 from sqlalchemy import text
+import os
+import uuid
+import datetime
+import re
+from dotenv import load_dotenv  # Para cargar variables de entorno
 
 # Importamos las clases y funciones que necesitamos de otros archivos.
 from db.session import SessionLocal
@@ -18,18 +22,22 @@ from db.session import SessionLocal
 from dtos.usuario_dto import UsuarioCreate, UsuarioOut, UsuarioUpdate, UsuarioLogin
 # Modelo de SQLAlchemy que se mapea a la tabla 'usuarios'.
 from models.usuarios import Usuario
+from models.videos import Video
 # Funciones de utilidad para enviar correos y gestionar tokens.
-from utils.email_utils import send_registration_email
+from utils.email_utils import send_registration_email, enviar_recuperacion_contrasena
 from utils.jwt_utils import create_access_token, create_refresh_token, get_current_user
 
 # Creamos un enrutador de FastAPI.
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
 
+# Cargar variables de entorno
+load_dotenv()
+
 # --- Variables de seguridad para el bloqueo de intentos ---
 # Diccionario para almacenar intentos fallidos: {clave: [intentos, timestamp_bloqueo]}
 failed_attempts = {}
-MAX_ATTEMPTS = 5         # Número máximo de intentos antes de bloquear.
-BLOCK_TIME = 60 * 5      # Tiempo de bloqueo en segundos (5 minutos).
+MAX_ATTEMPTS = int(os.getenv("MAX_LOGIN_ATTEMPTS", "5"))
+BLOCK_TIME = int(os.getenv("LOGIN_ATTEMPT_TIMEOUT", "300"))
 
 # --- Dependencia de la base de datos ---
 # Función que gestiona la sesión de la base de datos.
@@ -56,29 +64,7 @@ def is_blocked(key):
 class RecuperarRequest(BaseModel):
     email: str
 
-# Función auxiliar para enviar un correo (se podría mover a `email_utils`).
-def enviar_correo(destinatario, nueva_contrasena):
-    # NOTA: En un entorno de producción, nunca se deben usar credenciales de correo
-    # hardcodeadas como estas. Se deben usar variables de entorno.
-    remitente = "josnishop@gmail.com"
-    password = "iyzn auso rqox thkm"  # Contraseña de aplicación de Gmail.
-    asunto = "Recuperación de contraseña de tu cuenta en JosniShop"
-    cuerpo = f"""
-Hola,
-
-Tu nueva contraseña para JosniShop es: {nueva_contrasena}
-
-Por favor, inicia sesión y cámbiala por una que recuerdes, en tu panel.
-
-¡Gracias por confiar en nosotros!
-"""
-    msg = MIMEText(cuerpo)
-    msg["Subject"] = asunto
-    msg["From"] = remitente
-    msg["To"] = destinatario
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(remitente, password)
-        server.sendmail(remitente, destinatario, msg.as_string())
+# Email sending for password recovery is handled in `utils.email_utils.enviar_recuperacion_contrasena`
 
 
 # --- Endpoints de la API ---
@@ -153,6 +139,10 @@ def register(user: UsuarioCreate):
     nuevo_usuario = Usuario(**user.dict())
     nuevo_usuario.contraseña = hashed.decode('utf-8')
     nuevo_usuario.estado = 1  # Activo por defecto
+    # Hashear la respuesta de seguridad con bcrypt (igual que la contraseña)
+    if getattr(user, 'seguridad_respuesta', None):
+        hashed_resp = bcrypt.hashpw(user.seguridad_respuesta.strip().encode('utf-8'), bcrypt.gensalt())
+        nuevo_usuario.seguridad_respuesta = hashed_resp.decode('utf-8')
     db.add(nuevo_usuario)
     db.commit()
     db.refresh(nuevo_usuario)
@@ -161,6 +151,24 @@ def register(user: UsuarioCreate):
     threading.Thread(target=send_registration_email, args=(user.correo,)).start()
     
     return {"msg": "Usuario creado", "usuario": nuevo_usuario.id_usuario}
+
+
+@router.post("/{usuario_id}/verificar-seguridad")
+def verificar_seguridad(usuario_id: int, payload: dict):
+    db = SessionLocal()
+    usuario = db.query(Usuario).filter(Usuario.id_usuario == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    respuesta = payload.get("respuesta", "").strip()
+    if not usuario.seguridad_respuesta:
+        raise HTTPException(status_code=400, detail="No hay pregunta de seguridad configurada")
+    
+    # Verificar con bcrypt (igual que en login)
+    # La respuesta se envía en texto plano, el hash está en la BD
+    if not bcrypt.checkpw(respuesta.encode('utf-8'), usuario.seguridad_respuesta.encode('utf-8')):
+        raise HTTPException(status_code=401, detail="Respuesta de seguridad incorrecta")
+    
+    return {"msg": "Verificación exitosa", "valid": True}
 
 ### 7. Login de usuario (POST)
 @router.post("/login")
@@ -191,7 +199,8 @@ def login(user: UsuarioLogin, request: Request):
         "correo": db_user.correo,
         "rol": db_user.rol.nombre,
         "rol_id": db_user.rol_id,
-        "estado": db_user.estado  # <-- AGREGA ESTA LÍNEA
+        # Coerce boolean/None to int/None to match DTO expectations (0/1/null)
+        "estado": int(db_user.estado) if db_user.estado is not None else None
     }
 
 ### 8. Recuperar contraseña (POST)
@@ -212,8 +221,9 @@ def recuperar_contrasena(request: RecuperarRequest):
     db.commit()
     db.close()
     
-    # Envía el correo con la nueva contraseña temporal.
-    enviar_correo(request.email, nueva_contrasena)
+    # Envía el correo con la nueva contraseña temporal (usa plantilla central)
+    # enviar_recuperacion_contrasena hace login con las credenciales en env
+    enviar_recuperacion_contrasena(request.email, nueva_contrasena)
     
     return {"msg": "Nueva contraseña enviada al correo"}
 
@@ -301,3 +311,85 @@ def activar_usuario(usuario_id: int, db: Session = Depends(get_db)):
     usuario.estado = 1  # O True si es booleano
     db.commit()
     return {"message": "Usuario activado"}
+
+
+### 13. Subir foto de perfil (POST)
+@router.post("/{usuario_id}/upload-perfil")
+async def upload_foto_perfil(
+    usuario_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """Permite que un usuario suba o actualice su foto de perfil"""
+    usuario = db.query(Usuario).filter(Usuario.id_usuario == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    if not file:
+        raise HTTPException(status_code=400, detail="No se proporciono archivo")
+    
+    # Validar que sea imagen
+    allowed_types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Solo se permiten imágenes (JPEG, PNG, GIF, WebP)")
+    
+    try:
+        # Directorio de guardado
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        uploads_dir = os.path.join(base_dir, 'static', 'uploads')
+        os.makedirs(uploads_dir, exist_ok=True)
+        
+        # Sanitizar nombre de archivo
+        def _sanitize_filename(name: str) -> str:
+            name = name.replace('\\', '_').replace('/', '_')
+            name = re.sub(r'[<>:\\"/\\|?*]', '_', name)
+            name = re.sub(r'\s+', '_', name).strip('_')
+            return name
+        
+        safe_name = _sanitize_filename((file.filename or 'profile'))
+        safe_name = safe_name.replace('..', '_')
+        filename = f"{uuid.uuid4().hex}__{safe_name}"
+        from pathlib import Path
+
+        uploads_path = Path(uploads_dir).resolve()
+        final_path = (uploads_path / filename).resolve()
+        if not str(final_path).startswith(str(uploads_path) + os.sep) and final_path != uploads_path:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        # Guardar archivo
+        contents = await file.read()
+        with open(final_path, 'wb') as f:
+            f.write(contents)
+        
+        url = f"/static/uploads/{filename}"
+        
+        # Eliminar foto anterior si existe
+        old_foto = db.query(Video).filter(
+            Video.usuario_id == usuario_id,
+            Video.tipo == 'perfil'
+        ).first()
+        if old_foto:
+            db.delete(old_foto)
+            db.commit()
+        
+        # Guardar nuevo registro de foto en tabla videos
+        db_foto = Video(
+            usuario_id=usuario_id,
+            tipo='perfil',
+            url=url,
+            fecha_subida=datetime.datetime.utcnow()
+        )
+        db.add(db_foto)
+        db.commit()
+        db.refresh(db_foto)
+        
+        return {
+            "success": True,
+            "message": "Foto de perfil actualizada correctamente",
+            "foto_id": db_foto.id,
+            "url": url
+        }
+    
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al subir archivo: {str(e)}")

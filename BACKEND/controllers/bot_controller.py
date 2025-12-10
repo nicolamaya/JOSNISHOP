@@ -48,6 +48,11 @@ def respond(payload: BotRequest, db: Session = Depends(get_db)):
 
     This keeps the implementation dependency-free and performs better on longer user messages.
     """
+    # Require an authenticated user: frontend should send `usuario_origen` (user id)
+    if not payload.usuario_origen:
+        # Do not answer bot requests for anonymous users
+        raise HTTPException(status_code=401, detail="Debes iniciar sesión para usar el chatbot")
+
     mensaje = (payload.mensaje or "").lower()
     respuestas = db.query(BotResponse).filter(BotResponse.enabled == True).order_by(BotResponse.prioridad.desc()).all()
 

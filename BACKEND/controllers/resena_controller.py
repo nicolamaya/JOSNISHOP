@@ -9,6 +9,8 @@ from controllers.notificacion_controller import crear_notificacion
 from datetime import datetime
 from pydantic import BaseModel
 from utils.email_utils import enviar_alerta_resena
+from utils.email_utils import enviar_respuesta_resena
+from models.usuarios import Usuario
 
 router = APIRouter(prefix="/resenas", tags=["reseñas"])
 
@@ -88,6 +90,25 @@ def responder_resena(resena_id: int, data: dict, db: Session = Depends(get_db)):
     resena.respuesta_vendedor = data.get("respuesta")
     db.commit()
     db.refresh(resena)
+    
+    # Enviar correo al cliente que dejó la reseña notificando la respuesta del vendedor
+    try:
+        cliente = db.query(Usuario).filter_by(id_usuario=resena.cliente_id).first()
+        producto = db.query(Producto).filter_by(id=resena.producto_id).first()
+        if cliente and cliente.correo:
+            enviar_respuesta_resena(destinatario=cliente.correo,
+                                    producto=producto.nombre if producto else 'Producto',
+                                    respuesta_vendedor=resena.respuesta_vendedor)
+            # crear una notificación interna también
+            try:
+                crear_notificacion(db, cliente.id_usuario, f"Tu reseña en {producto.nombre if producto else 'un producto'} ha recibido una respuesta.")
+            except Exception:
+                pass
+    except Exception:
+        # No bloquear la respuesta si falla el envío de correo
+        pass
+
+    return {"msg": "Respuesta guardada", "respuesta_vendedor": resena.respuesta_vendedor}
     return {"msg": "Respuesta guardada", "respuesta_vendedor": resena.respuesta_vendedor}
 
 @router.get("/producto/{producto_id}", response_model=list[ResenaOut])

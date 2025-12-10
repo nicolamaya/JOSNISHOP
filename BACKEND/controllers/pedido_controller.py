@@ -14,6 +14,8 @@ from db.session import SessionLocal
 from dtos.pedido_dto import PedidoCreate, PedidoOut, PedidoUpdate
 # Importamos el modelo de SQLAlchemy que se mapea a la tabla de 'pedidos'.
 from models.pedido import Pedido
+from utils.email_utils import enviar_cambio_estado_pedido
+from models.usuarios import Usuario
 
 # Creamos un enrutador de FastAPI.
 # `prefix="/pedidos"`: Todas las rutas de este archivo comenzarán con "/pedidos".
@@ -126,17 +128,32 @@ def actualizar_pedido(
     # Si no existe, lanzamos un error 404.
     if not pedido:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    
+    # Guardar estado anterior para detectar cambios
+    estado_anterior = pedido.estado
+
     # Iteramos sobre los datos recibidos en la petición.
     # `datos.dict(exclude_unset=True)` solo incluye los campos que el cliente envió.
     for key, value in datos.dict(exclude_unset=True).items():
         # Usamos `setattr` para actualizar dinámicamente cada atributo del objeto.
         setattr(pedido, key, value)
-        
+
     # Guardamos los cambios en la base de datos.
     db.commit()
     # Recargamos el objeto para asegurarnos de que el cliente obtenga la versión más reciente.
     db.refresh(pedido)
+
+    # Si el estado cambió, enviar correo al cliente notificando el cambio
+    try:
+        nuevo_estado = pedido.estado
+        if nuevo_estado != estado_anterior:
+            # obtener correo del cliente
+            cliente = db.query(Usuario).filter_by(id_usuario=pedido.cliente_id).first()
+            if cliente and cliente.correo:
+                enviar_cambio_estado_pedido(cliente.correo, pedido.id_pedido, nuevo_estado)
+    except Exception as e:
+        # No bloquear la actualización por fallo en el envío de correo
+        print('Error enviando notificación de estado de pedido:', e)
+
     # Devolvemos el objeto actualizado.
     return pedido
 
