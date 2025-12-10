@@ -58,6 +58,6 @@ jobs:
 
     - name: Correr pruebas unitarias (Pytest) # Paso 5: Ejecutar las pruebas unitarias
       env:
-          PYTHONPATH: BACKEND
+          PYTHONPATH: ${{ github.workspace }}/BACKEND
       run: |
         pytest
