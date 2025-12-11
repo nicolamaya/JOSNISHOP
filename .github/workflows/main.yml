@@ -34,10 +34,10 @@ jobs:
     - name: Checkout del código # Paso 1: Obtener el código del repositorio
       uses: actions/checkout@v4
       
-    - name: Instalar dependencias para MariaDB # ¡Paso nuevo!: Intalar las dependencias necesarias para que sirva Mariadb
+    - name: Instalar dependencias del sistema (MariaDB y Cairo) # ¡PASO MODIFICADO!: Instalar las dependencias necesarias.
       run: |
           sudo apt-get update
-          sudo apt-get install -y libmariadb-dev
+          sudo apt-get install -y libmariadb-dev libcairo2-dev
           
     - name: Configurar Python # Paso 2: Configurar el entorno de Python
       uses: actions/setup-python@v5
