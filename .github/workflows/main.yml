@@ -56,5 +56,10 @@ jobs:
     - name: Correr pruebas unitarias (Pytest) # Paso 5: Ejecutar las pruebas unitarias
       env:
           PYTHONPATH: BACKEND
+          DB_HOST: mysql           # Usa el nombre del servicio de MariaDB
+          DB_USER: root            # Usuario (del servicio)
+          DB_PASSWORD: ''          # Contraseña vacía (porque usamos MYSQL_ALLOW_EMPTY_PASSWORD: yes)
+          DB_PORT: 3306            # El puerto mapeado del servicio
+          DB_NAME: test_db_ci      # La base de datos creada en el servicio
       run: |
         pytest
