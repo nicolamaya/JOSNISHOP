@@ -24,7 +24,7 @@ jobs:
           MYSQL_DATABASE: test_db_ci
         ports:
           # Mapea el puerto del contenedor (3306) al puerto de la red de la CI (3306)
-          - 3306:3306
+          - 3315:3306
         options: >-
           --health-cmd="mysqladmin ping"
           --health-interval=10s
@@ -56,6 +56,23 @@ jobs:
       run: |
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+
+    - name: ⏳ Esperar a que la Base de Datos esté lista
+      run: |
+        # Cambiado de localhost:3315 a mysql:3306
+        echo "Esperando a que MariaDB inicie en mysql:3306 (nombre del servicio)..." 
+        for i in $(seq 1 15); do 
+          # Usamos 'mysql' (nombre del servicio) y '3306' (puerto interno)
+          if nc -z mysql 3306; then 
+            echo "✅ MariaDB está listo en mysql:3306"
+            exit 0
+          fi
+          echo "MariaDB no está listo... reintentando en 4 segundos (intento $i/15)"
+          sleep 4
+        done
+        echo "❌ Falló la conexión a MariaDB después de 60 segundos."
+        exit 1
+
 
     - name: Correr pruebas unitarias (Pytest) # Paso 5: Ejecutar las pruebas unitarias
       env:
