@@ -72,6 +72,19 @@ jobs:
         echo "❌ Falló la conexión a MariaDB después de 60 segundos."
         exit 1
 
+    - name: ⚙️ Inicializar Esquema de la Base de Datos
+      # Reutilizamos las variables de entorno ya corregidas
+      env:
+          DB_HOST: 127.0.0.1 
+          DB_PORT: 3315
+          DB_USER: root
+          DB_PASS: "" 
+          MYSQL_DATABASE: test_db_ci 
+      run: |
+          # Ejecutamos el script de inicialización
+          python BACKEND/db/init_db.py 
+
+    - name: Correr pruebas unitarias (Pytest)
 
     - name: Correr pruebas unitarias (Pytest) # Paso 5: Ejecutar las pruebas unitarias
       env:
