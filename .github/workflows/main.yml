@@ -84,8 +84,6 @@ jobs:
           # Ejecutamos el script de inicialización
           python BACKEND/db/init_db.py 
 
-    - name: Correr pruebas unitarias (Pytest)
-
     - name: Correr pruebas unitarias (Pytest) # Paso 5: Ejecutar las pruebas unitarias
       env:
           PYTHONPATH: ${{ github.workspace }}/BACKEND
