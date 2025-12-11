@@ -59,12 +59,11 @@ jobs:
 
     - name: ⏳ Esperar a que la Base de Datos esté lista
       run: |
-        # Cambiado de localhost:3315 a mysql:3306
-        echo "Esperando a que MariaDB inicie en mysql:3306 (nombre del servicio)..." 
+        echo "Esperando a que MariaDB inicie en 127.0.0.1:3315 (Usando mapeo de puertos)..." 
+        # Usamos 127.0.0.1 (o localhost) y el puerto mapeado 3315
         for i in $(seq 1 15); do 
-          # Usamos 'mysql' (nombre del servicio) y '3306' (puerto interno)
-          if nc -z mysql 3306; then 
-            echo "✅ MariaDB está listo en mysql:3306"
+          if nc -z 127.0.0.1 3315; then # <--- CAMBIO CLAVE: Usar 127.0.0.1:3315
+            echo "✅ MariaDB está listo en 127.0.0.1:3315"
             exit 0
           fi
           echo "MariaDB no está listo... reintentando en 4 segundos (intento $i/15)"
