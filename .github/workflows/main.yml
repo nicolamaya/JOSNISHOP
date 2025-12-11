@@ -24,13 +24,12 @@ jobs:
           MYSQL_DATABASE: test_db_ci
         ports:
           # Mapea el puerto del contenedor (3306) al puerto de la red de la CI (3306)
-          - 3315:3306
+          - 3306:3306
         options: >-
           --health-cmd="mysqladmin ping"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
-
     steps:
     - name: Checkout del código # Paso 1: Obtener el código del repositorio
       uses: actions/checkout@v4
@@ -39,7 +38,6 @@ jobs:
       run: |
           sudo apt-get update
           sudo apt-get install -y libmariadb-dev
-          sudo apt-get install -y libcairo2-dev libgirepository1.0-dev
           
     - name: Configurar Python # Paso 2: Configurar el entorno de Python
       uses: actions/setup-python@v5
@@ -51,47 +49,12 @@ jobs:
         python -m pip install --upgrade pip  
         pip install flake8 pytest
         pip install -r BACKEND/requirements.txt
-
     - name: Validar con Linter (Flake8) # Paso 4: Ejecutar el linter para validar el estilo y sintaxis
       run: |
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
-
-    - name: ⏳ Esperar a que la Base de Datos esté lista
-      run: |
-        echo "Esperando a que MariaDB inicie en 127.0.0.1:3315 (Usando mapeo de puertos)..." 
-        # Usamos 127.0.0.1 (o localhost) y el puerto mapeado 3315
-        for i in $(seq 1 15); do 
-          if nc -z 127.0.0.1 3315; then # <--- CAMBIO CLAVE: Usar 127.0.0.1:3315
-            echo "✅ MariaDB está listo en 127.0.0.1:3315"
-            exit 0
-          fi
-          echo "MariaDB no está listo... reintentando en 4 segundos (intento $i/15)"
-          sleep 4
-        done
-        echo "❌ Falló la conexión a MariaDB después de 60 segundos."
-        exit 1
-
-    - name: ⚙️ Inicializar Esquema de la Base de Datos
-      # Reutilizamos las variables de entorno ya corregidas
-      env:
-          DB_HOST: 127.0.0.1 
-          DB_PORT: 3315
-          DB_USER: root
-          DB_PASS: "" 
-          MYSQL_DATABASE: test_db_ci 
-      run: |
-          # Ejecutamos el script de inicialización
-          python BACKEND/db/init_db.py 
-
     - name: Correr pruebas unitarias (Pytest) # Paso 5: Ejecutar las pruebas unitarias
       env:
-          PYTHONPATH: ${{ github.workspace }}/BACKEND
-          DB_HOST: 127.0.0.1           # Nombre del servicio
-          DB_PORT: 3315            # Puerto por defecto del contenedor MariaDB
-          DB_USER: root
-          DB_PASS: ""              # Usaste MYSQL_ALLOW_EMPTY_PASSWORD: yes
-          MYSQL_DATABASE: test_db_ci # Nombre de la BD de prueba
+          PYTHONPATH: BACKEND
       run: |
-        sleep 10
         pytest
